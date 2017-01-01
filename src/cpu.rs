@@ -38,7 +38,12 @@ enum OperandType {
     None
 }
 
-struct Instruction {
+#[derive(Debug)]
+enum CpuError {
+    OutOfBytes
+}
+
+pub struct Instruction {
     function: OpCode,
     operand_type1: OperandType,
     operand_type2: OperandType,
@@ -72,10 +77,12 @@ impl<'cool> Cpu<'cool> {
 
     pub fn consume_instruction(&self) -> Instruction {
         //println!("reg_pc: {} <- {}", self.reg_pc, self.raw_bytes[self.reg_pc as usize]);
-        let op = self.raw_bytes[self.reg_pc as usize];
+        // need to figure out how to test for instructions and return the instruction at the same time
+        let op = self.peek_bytes(1).unwrap()[0];
         match op {
-            op if self.test_ld_r_r(op) => { println!("LD r, r'"); },
-            op if self.test_ld_r_n(op) => { println!("LD r, n"); },
+            op if self.test_ld_r_r(op)  => { println!("LD r, r'"); },
+            op if self.test_ld_r_n(op)  => { println!("LD r, n"); },
+            op if self.test_ld_r_hl(op) => { println!("LD r, (HL)"); },
             _ => { println!("unknown"); }
         };
 
@@ -87,15 +94,36 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
+    fn peek_bytes(&self, num_bytes: usize) -> Result<&[u8], CpuError> {
+        if self.raw_bytes.len() <= num_bytes {
+            return Err(CpuError::OutOfBytes);
+        }
+
+        Ok(&self.raw_bytes[0..num_bytes])
+    }
+
+    fn consume_bytes(&mut self, num_bytes: usize) -> Result<&[u8], CpuError> {
+        self.reg_pc += num_bytes as u16;
+        self.peek_bytes(num_bytes)
+    }
+
     fn test_ld_r_r(&self, opcode: u8) -> bool {
-        utils::extract_bits(opcode, 0b01000000) > 0
+        let bytes = self.peek_bytes(1).unwrap();
+        utils::extract_bits(bytes[0], 0b01000000) > 0
     }
 
     fn test_ld_r_n(&self, opcode: u8) -> bool {
         utils::extract_bits(opcode, 0b00000110) > 0
     }
-}
 
+    fn test_ld_r_hl(&self, opcode: u8) -> bool {
+        utils::extract_bits(opcode, 0b00000110) > 0
+    }
+
+    fn test_ld_r_ix_d(&self, opcode: u8) -> bool {
+        utils::extract_bits(opcode, 0b11011101) > 0
+    }
+}
 /*
 fn main() -> () {
     let ld: Instruction = Instruction {
