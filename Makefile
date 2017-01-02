@@ -1,8 +1,11 @@
-cool_flags = #-A unused_variables -A dead_code -A unused_imports
+cool_flags = -A dead_code
 prod_flags = 
 
 all:
 	RUSTFLAGS="${cool_flags}" cargo build && mv target/debug/gbc main
+
+test:
+	RUSTFLAGS="${cool_flags}" cargo test
 
 hell:
 	rustc $(cool_flags) hell.rs
