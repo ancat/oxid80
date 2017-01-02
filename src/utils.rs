@@ -9,3 +9,11 @@ pub fn extract_bits(byte: u8, bitmask: u8) -> u8 {
 
     return i_value;
 }
+
+pub fn bitmask(byte: u8, bitmask: u8) -> u8 {
+    byte & bitmask
+}
+
+pub fn bits_set(byte: u8, bitmask: u8) -> bool {
+    (byte & bitmask) == bitmask
+}

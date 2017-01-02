@@ -29,25 +29,13 @@ fn main() -> () {
         Ok(_) => {}
     }
 
-    let processor: cpu::Cpu = cpu::Cpu::new(&bytes);
-    processor.consume_instruction();
+    let mut processor: cpu::Cpu = cpu::Cpu::new(&bytes);
 
-    /*
-    let mut offset = 0;
-    let mut consumed = 0;
-    while offset < bytes.len() {
-        consumed = 1;
-        match bytes[offset] {
-            x if utils::extract_bits(x, 0b01) => {println!("virtual insanilty");},
-            x if x & 0b01000000 != 0 => { println!("ld r, r' {:x} {:b} {:b}", x, (x&0b00111000)>>3, x&0b00000111); consumed = 1; },
-            x if x == 0x31 => { println!("ld sp, {:x}{:x}", bytes[offset+1], bytes[offset+2]); consumed = 3; }
-            _ => { println!("unimpl"); consumed = 1; }
-        }
-
-        //println!("bytes consumed: {}", consumed);
-        offset += consumed;
+    for _ in 0..3 {
+        let instruction = processor.fetch_instruction();
+        println!("Fetched {}", instruction);
+        processor.consume_instruction();
     }
-    */
 
     exit(0);
 }
