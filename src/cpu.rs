@@ -38,10 +38,16 @@ enum OperandType {
     None
 }
 
+/*
+    If OperandType is Memory, then:
+    value = register
+    displacement = offset
+    problem: what if the value is 0? that's register B!
+*/
 #[derive(Debug)]
 pub struct Operand {
     mode: OperandType,
-    value: u16,
+    value: u16, // needs to be able to hold a register and a value... what do
     displacement: u16,
 }
 
@@ -55,7 +61,7 @@ pub struct Instruction {
     operand1: Operand,
     operand2: Operand,
     cycles: i8,
-    bytes: u8,
+    pub bytes: u8,
 }
 
 impl fmt::Display for Instruction {
@@ -140,6 +146,30 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
+    pub fn register_single_bitmask_to_enum(&self, mask: u8) -> Register {
+        match mask {
+            0b000 => { Register::RegB  },
+            0b001 => { Register::RegC  },
+            0b010 => { Register::RegD  },
+            0b011 => { Register::RegE  },
+            0b100 => { Register::RegH  },
+            0b101 => { Register::RegL  },
+            0b110 => { Register::RegHL },
+            0b111 => { Register::RegA  },
+            _     => { panic!("unknown single register bitmask"); }
+        }
+    }
+
+    pub fn register_pair_bitmask_to_enum(&self, mask: u8) -> Register {
+        match mask {
+            0b00 => { Register::RegBC },
+            0b01 => { Register::RegDE },
+            0b10 => { Register::RegHL },
+            0b11 => { Register::RegSP },
+            _    => { panic!("unknown register pair bitmask"); }
+        }
+    }
+
     pub fn assemble_ld(&self, opcode: u8) -> Instruction {
         // Special exception for reg (HL) = 0b110
         if utils::extract_bits(opcode, 0b11000000) == 0b01 {
@@ -147,15 +177,15 @@ impl<'cool> Cpu<'cool> {
             // LD r, (HL)
             let dst = utils::extract_bits(opcode, 0b00111000);
             let dst = Operand {
-                mode: OperandType::Register,
-                value: dst as u16,
+                mode: if dst == 0b110 { OperandType::Register } else { OperandType::Memory} ,
+                value: self.register_single_bitmask_to_enum(dst),
                 displacement: 0
             };
 
             let src = utils::extract_bits(opcode, 0b00000111);
             let src = Operand {
                 mode: OperandType::Register,
-                value: src as u16,
+                value: self.register_single_bitmask_to_enum(src),
                 displacement: 0
             };
 
@@ -173,11 +203,36 @@ impl<'cool> Cpu<'cool> {
             let src = opcodes[1] as u16;
             let src = Operand {
                 mode: OperandType::Immediate,
-                value: src as u16,
+                value: self.register_single_bitmask_to_enum(src),
                 displacement: 0
             };
 
             Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 2, bytes: 2}
+        } else if opcode == 0b11011101 || opcode == 0b11111101 {
+            // LD r, (IX+d)
+            // LD r, (IY+d)
+            let opcodes = self.peek_bytes(3).unwrap(); // this instruction is 3 bytes
+            let displacement = opcodes[2];
+            let dst = utils::extract_bits(opcodes[1], 0b00111000);
+            let dst = Operand {
+                mode: OperandType::Register,
+                value: self.register_single_bitmask_to_enum(dst),
+                displacement: 0
+            };
+
+            // handle IX, IY
+            let src = match opcode {
+                0b11011101 => { Register::RegIX },
+                0b11111101 => { Register::RegIY },
+                _ => { panic!("unknown register in ld"); }
+            };
+            let src = Operand {
+                mode: OperandType::Register,
+                value: src,
+                displacement: displacement
+            };
+
+            Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 5, bytes: 3}
         } else {
             panic!("unknown ld {:x}", opcode);
         }
