@@ -31,9 +31,9 @@ fn main() -> () {
 
     let mut processor: cpu::Cpu = cpu::Cpu::new(&bytes);
 
-    for _ in 0..3 {
+    for _ in 0..5 {
         let instruction = processor.fetch_instruction();
-        println!("Fetched {}", instruction);
+        println!("Fetched {} ({} bytes)", instruction, instruction.bytes);
         processor.consume_instruction();
     }
 
