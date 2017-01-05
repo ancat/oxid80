@@ -1,8 +1,9 @@
 use utils;
 use std::fmt;
 
-#[derive(Debug)]
-enum Register {
+#[derive(Debug, Copy, Clone)]
+pub enum Register {
+    None,
     RegA,
     RegB,
     RegC,
@@ -18,6 +19,31 @@ enum Register {
     RegIY,
     RegSP,
     RegPC
+}
+
+impl fmt::Display for Register {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let printable = match *self {
+            Register::RegA => "A",
+            Register::RegB => "B",
+            Register::RegC => "C",
+            Register::RegD => "D",
+            Register::RegE => "E",
+            Register::RegF => "F",
+            Register::RegH => "H",
+            Register::RegL => "L",
+            Register::RegBC => "BC",
+            Register::RegDE => "DE",
+            Register::RegHL => "HL",
+            Register::RegIX => "IX",
+            Register::RegIY => "IY",
+            Register::RegSP => "SP",
+            Register::RegPC => "PC",
+            Register::None  => panic!("beep beep invalid register")
+        };
+
+        write!(f, "{}", printable)
+    }
 }
 
 #[derive(Debug)]
@@ -47,8 +73,20 @@ enum OperandType {
 #[derive(Debug)]
 pub struct Operand {
     mode: OperandType,
-    value: u16, // needs to be able to hold a register and a value... what do
+    value: u16,
     displacement: u16,
+    register: Register,
+}
+
+impl Default for Operand {
+    fn default() -> Operand {
+        Operand {
+            mode: OperandType::None,
+            value: 0,
+            displacement: 0,
+            register: Register::None
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -66,21 +104,24 @@ pub struct Instruction {
 
 impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let regs = ["B", "C", "D", "E", "H", "L", "(HL)", "A"];
         let opcode = &self.function;
         let operand1 = self.operand1.value.to_string();
+        let operand_reg1 = self.operand1.register.to_string();
         let operand2 = self.operand2.value.to_string();
+        let operand_reg2 = self.operand2.register.to_string();
 
         let operand1 = match self.operand1.mode {
-            OperandType::Register => regs[self.operand1.value as usize],
-            OperandType::Immediate => &operand1,
-            _ => panic!("what's that"),
+            OperandType::Register => { println!("reggy"); &operand_reg1 },
+            OperandType::Immediate => { println!("immediate"); &operand1 },
+            OperandType::Memory => { println!("heya"); &operand1 },
+            OperandType::None => panic!("we got nun, is that a thing?"),
         };
 
         let operand2 = match self.operand2.mode {
-            OperandType::Register => regs[self.operand2.value as usize],
-            OperandType::Immediate => &operand2,
-            _ => panic!("what's that"),
+            OperandType::Register => { println!("reggy"); &operand_reg2 },
+            OperandType::Immediate => { println!("immediate"); &operand2 },
+            OperandType::Memory => { println!("heya"); &operand2 },
+            OperandType::None => panic!("we got nun, is that a thing?"),
         };
 
         write!(f, "{:?} {}, {}", opcode, operand1, operand2)
@@ -88,6 +129,7 @@ impl fmt::Display for Instruction {
 }
 
 // TODO: wait a minute why am I storing the ram in the cpu? that don't make sense.
+// TODO: Please Stop
 pub struct Cpu<'cool> {
     raw_bytes: &'cool [u8],
     reg_pc: u16,
@@ -100,6 +142,28 @@ impl<'cool> Cpu<'cool> {
             raw_bytes: raw_bytes,
             reg_pc: 0,
             cycles: 0,
+        }
+    }
+
+    pub fn bogus_shit(&self) -> Instruction {
+        let operand1 = Operand {
+            mode: OperandType::Register,
+            register: Register::RegA,
+            ..Default::default()
+        };
+
+        let operand2 = Operand {
+            mode: OperandType::Register,
+            register: Register::RegB,
+            ..Default::default()
+        };
+
+        Instruction {
+            function: OpCode::ADC,
+            operand1: operand1,
+            operand2: operand2,
+            bytes: 1,
+            cycles: 2,
         }
     }
 
@@ -146,7 +210,7 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
-    pub fn register_single_bitmask_to_enum(&self, mask: u8) -> Register {
+    fn register_single_bitmask_to_enum(&self, mask: u8) -> Register {
         match mask {
             0b000 => { Register::RegB  },
             0b001 => { Register::RegC  },
@@ -156,11 +220,11 @@ impl<'cool> Cpu<'cool> {
             0b101 => { Register::RegL  },
             0b110 => { Register::RegHL },
             0b111 => { Register::RegA  },
-            _     => { panic!("unknown single register bitmask"); }
+            _     => { panic!("unknown single register bitmask {:?}", mask); }
         }
     }
 
-    pub fn register_pair_bitmask_to_enum(&self, mask: u8) -> Register {
+    fn register_pair_bitmask_to_enum(&self, mask: u8) -> Register {
         match mask {
             0b00 => { Register::RegBC },
             0b01 => { Register::RegDE },
@@ -178,15 +242,17 @@ impl<'cool> Cpu<'cool> {
             let dst = utils::extract_bits(opcode, 0b00111000);
             let dst = Operand {
                 mode: if dst == 0b110 { OperandType::Register } else { OperandType::Memory} ,
-                value: self.register_single_bitmask_to_enum(dst),
-                displacement: 0
+                register: self.register_single_bitmask_to_enum(dst),
+                displacement: 0,
+                ..Default::default()
             };
 
             let src = utils::extract_bits(opcode, 0b00000111);
             let src = Operand {
                 mode: OperandType::Register,
-                value: self.register_single_bitmask_to_enum(src),
-                displacement: 0
+                register: self.register_single_bitmask_to_enum(src),
+                displacement: 0,
+                ..Default::default()
             };
 
             Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 1, bytes: 1}
@@ -197,14 +263,16 @@ impl<'cool> Cpu<'cool> {
             let dst = Operand {
                 mode: OperandType::Register,
                 value: dst as u16,
-                displacement: 0
+                displacement: 0,
+                ..Default::default()
             };
 
-            let src = opcodes[1] as u16;
+            let src = opcodes[1];
             let src = Operand {
                 mode: OperandType::Immediate,
-                value: self.register_single_bitmask_to_enum(src),
-                displacement: 0
+                value: src as u16,
+                displacement: 0,
+                ..Default::default()
             };
 
             Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 2, bytes: 2}
@@ -216,8 +284,9 @@ impl<'cool> Cpu<'cool> {
             let dst = utils::extract_bits(opcodes[1], 0b00111000);
             let dst = Operand {
                 mode: OperandType::Register,
-                value: self.register_single_bitmask_to_enum(dst),
-                displacement: 0
+                register: self.register_single_bitmask_to_enum(dst),
+                displacement: 0,
+                ..Default::default()
             };
 
             // handle IX, IY
@@ -228,8 +297,9 @@ impl<'cool> Cpu<'cool> {
             };
             let src = Operand {
                 mode: OperandType::Register,
-                value: src,
-                displacement: displacement
+                register: src,
+                displacement: displacement as u16,
+                ..Default::default()
             };
 
             Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 5, bytes: 3}
