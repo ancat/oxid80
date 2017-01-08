@@ -17,3 +17,7 @@ pub fn bitmask(byte: u8, bitmask: u8) -> u8 {
 pub fn bits_set(byte: u8, bitmask: u8) -> bool {
     (byte & bitmask) == bitmask
 }
+
+pub fn u8_to_i16(byte: u8) -> i16 {
+    byte as i8 as i16
+}
