@@ -1,7 +1,7 @@
 use utils;
 use std::fmt;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, PartialEq)]
 pub enum Register {
     None,
     RegA,
@@ -39,7 +39,7 @@ impl fmt::Display for Register {
             Register::RegIY => "IY",
             Register::RegSP => "SP",
             Register::RegPC => "PC",
-            Register::None  => panic!("beep beep invalid register")
+            Register::None  => panic!("Attempting to display an invalid register")
         };
 
         write!(f, "{}", printable)
@@ -64,12 +64,6 @@ enum OperandType {
     None
 }
 
-/*
-    If OperandType is Memory, then:
-    value = register
-    displacement = offset
-    problem: what if the value is 0? that's register B!
-*/
 #[derive(Debug)]
 pub struct Operand {
     mode: OperandType,
@@ -89,7 +83,7 @@ impl Default for Operand {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum CpuError {
     OutOfBytes
 }
@@ -102,34 +96,47 @@ pub struct Instruction {
     pub bytes: u8,
 }
 
-impl fmt::Display for Instruction {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let opcode = &self.function;
-        let operand1 = self.operand1.value.to_string();
-        let operand_reg1 = self.operand1.register.to_string();
-        let operand2 = self.operand2.value.to_string();
-        let operand_reg2 = self.operand2.register.to_string();
+impl Instruction {
+    fn format_memory(&self, operand: &Operand) -> String {
+        let mut base = String::from("(");
+        if operand.register != Register::None {
+            base.push_str(&format!("{}", operand.register));
+        } else {
+            base.push_str(&format!("{}", operand.value));
+        }
 
-        let operand1 = match self.operand1.mode {
-            OperandType::Register => { println!("reggy"); &operand_reg1 },
-            OperandType::Immediate => { println!("immediate"); &operand1 },
-            OperandType::Memory => { println!("heya"); &operand1 },
-            OperandType::None => panic!("we got nun, is that a thing?"),
-        };
+        if operand.displacement != 0 {
+            base.push_str(&format!("+{}",operand.displacement));
+        }
+        base.push_str(")");
 
-        let operand2 = match self.operand2.mode {
-            OperandType::Register => { println!("reggy"); &operand_reg2 },
-            OperandType::Immediate => { println!("immediate"); &operand2 },
-            OperandType::Memory => { println!("heya"); &operand2 },
-            OperandType::None => panic!("we got nun, is that a thing?"),
-        };
-
-        write!(f, "{:?} {}, {}", opcode, operand1, operand2)
+        base
     }
 }
 
+impl fmt::Display for Instruction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let opcode = &self.function;
+        let value1: String = match self.operand1.mode {
+            OperandType::Register => format!("{}", self.operand1.register),
+            OperandType::Immediate => self.operand1.value.to_string(),
+            OperandType::Memory => self.format_memory(&self.operand1),
+            OperandType::None => format!("")
+        };
+
+        let value2: String = match self.operand2.mode {
+            OperandType::Register => format!("{}", self.operand2.register),
+            OperandType::Immediate => format!("{}", self.operand2.value),
+            OperandType::Memory => self.format_memory(&self.operand2),
+            OperandType::None => format!("")
+        };
+
+        return write!(f, "{:?} {}, {}", opcode, value1, value2);
+    }
+
+}
+
 // TODO: wait a minute why am I storing the ram in the cpu? that don't make sense.
-// TODO: Please Stop
 pub struct Cpu<'cool> {
     raw_bytes: &'cool [u8],
     reg_pc: u16,
@@ -167,23 +174,20 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
-    pub fn print_bytes(&self) {
-        for i in 0..self.raw_bytes.len() {
-            println!("here ya goooOO {}", self.raw_bytes[i]);
-        }
-    }
-
-    pub fn consume_instruction(&mut self) -> () {
+    pub fn consume_instruction(&mut self) -> Instruction {
         let instruction = self.fetch_instruction();
         self.reg_pc += instruction.bytes as u16;
         self.cycles += instruction.cycles as u64;
+        instruction
     }
 
     pub fn fetch_instruction(&self) -> Instruction {
-        //println!("reg_pc: {} <- {}", self.reg_pc, self.raw_bytes[self.reg_pc as usize]);
-        // need to figure out how to test for instructions and return the instruction at the same time
         // also: a bunch of ld instructions have the same starting byte
-        let op = self.peek_bytes(1).unwrap()[0];
+        let op = match self.peek_bytes(1) {
+            Ok(e) => { e[0] },
+            _ => panic!("out of bytes")
+        };
+
         match op {
             op if utils::bitmask(op, 0b11000000) == 0b01000000 => { self.assemble_ld(op) }, // LD r, r'
             op if utils::bitmask(op, 0b11000111) == 0b00000110 => { self.assemble_ld(op) }, // LD r, n
@@ -206,7 +210,7 @@ impl<'cool> Cpu<'cool> {
             op if utils::bitmask(op, 0b11111111) == 0b11101101 => { self.assemble_ld(op) }, // LD A, R
             op if utils::bitmask(op, 0b11111111) == 0b11101101 => { self.assemble_ld(op) }, // LD I, A
             op if utils::bitmask(op, 0b11111111) == 0b11101101 => { self.assemble_ld(op) }, // LD R, A
-            _ => { panic!("unknown"); }
+            opcode => { panic!("unknown {:x}", opcode); }
         }
     }
 
@@ -241,7 +245,7 @@ impl<'cool> Cpu<'cool> {
             // LD r, (HL)
             let dst = utils::extract_bits(opcode, 0b00111000);
             let dst = Operand {
-                mode: if dst == 0b110 { OperandType::Register } else { OperandType::Memory} ,
+                mode: if dst == 0b110 { OperandType::Memory } else { OperandType::Register } ,
                 register: self.register_single_bitmask_to_enum(dst),
                 displacement: 0,
                 ..Default::default()
@@ -249,21 +253,20 @@ impl<'cool> Cpu<'cool> {
 
             let src = utils::extract_bits(opcode, 0b00000111);
             let src = Operand {
-                mode: OperandType::Register,
+                mode: if src == 0b110 { OperandType::Memory } else { OperandType::Register } ,
                 register: self.register_single_bitmask_to_enum(src),
                 displacement: 0,
                 ..Default::default()
             };
 
-            Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 1, bytes: 1}
+            Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 1, bytes: 2}
         } else if utils::extract_bits(opcode, 0b11000111) == 0b00000110 {
             // LD r, n
             let opcodes = self.peek_bytes(2).unwrap(); // this instruction is 2 bytes
             let dst = utils::extract_bits(opcodes[0], 0b00111000);
             let dst = Operand {
                 mode: OperandType::Register,
-                value: dst as u16,
-                displacement: 0,
+                register: self.register_single_bitmask_to_enum(dst),
                 ..Default::default()
             };
 
@@ -310,7 +313,7 @@ impl<'cool> Cpu<'cool> {
     }
 
     fn peek_bytes(&self, num_bytes: usize) -> Result<&[u8], CpuError> {
-        if self.raw_bytes.len() <= num_bytes {
+        if self.raw_bytes.len() as u16 -self.reg_pc < num_bytes as u16 {
             return Err(CpuError::OutOfBytes);
         }
 
