@@ -68,7 +68,7 @@ enum OperandType {
 pub struct Operand {
     mode: OperandType,
     value: u16,
-    displacement: u16,
+    displacement: i16,
     register: Register,
 }
 
@@ -106,7 +106,11 @@ impl Instruction {
         }
 
         if operand.displacement != 0 {
-            base.push_str(&format!("+{}",operand.displacement));
+            if operand.displacement >= 0 {
+                base.push_str(&format!("+{}",operand.displacement));
+            } else {
+                base.push_str(&format!("{}",operand.displacement)); // minus sign from the signed int
+            }
         }
         base.push_str(")");
 
@@ -299,9 +303,9 @@ impl<'cool> Cpu<'cool> {
                 _ => { panic!("unknown register in ld"); }
             };
             let src = Operand {
-                mode: OperandType::Register,
+                mode: OperandType::Memory,
                 register: src,
-                displacement: displacement as u16,
+                displacement: utils::u8_to_i16(displacement),
                 ..Default::default()
             };
 
