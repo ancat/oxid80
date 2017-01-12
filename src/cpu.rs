@@ -263,7 +263,7 @@ impl<'cool> Cpu<'cool> {
                 ..Default::default()
             };
 
-            Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 1, bytes: 2}
+            Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 1, bytes: 1}
         } else if utils::extract_bits(opcode, 0b11000111) == 0b00000110 {
             // LD r, n
             let opcodes = self.peek_bytes(2).unwrap(); // this instruction is 2 bytes
@@ -332,3 +332,28 @@ impl<'cool> Cpu<'cool> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use cpu::Cpu;
+    #[test]
+    fn test_ld_r_r() {
+        let bytes = vec![0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47];
+        let mut processor: Cpu = Cpu::new(&bytes);
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, B");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, C");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, D");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, E");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, H");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, L");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, (HL)");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, A");
+    }
+
+    #[test]
+    fn test_ld_r_n() {
+        let bytes = vec![0x16, 0x32, 0x16, 0x7f];
+        let mut processor: Cpu = Cpu::new(&bytes);
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD D, 50");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD D, 127");
+    }
+}
