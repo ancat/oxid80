@@ -52,7 +52,8 @@ pub enum OpCode {
     INC,
     DEC,
     ADD,
-    ADC
+    ADC,
+    NOP
 }
 
 #[derive(Debug)]
@@ -192,18 +193,16 @@ impl<'cool> Cpu<'cool> {
             _ => panic!("out of bytes")
         };
 
+        // TODO: all LD IX/IY instructions start with the same opcode. need to defer opcode
+        // checking deeper into the disassembling stage
         match op {
-            op if utils::bitmask(op, 0b11000000) == 0b01000000 => { self.assemble_ld(op) }, // LD r, r'
-            op if utils::bitmask(op, 0b11000111) == 0b00000110 => { self.assemble_ld(op) }, // LD r, n
-            op if utils::bitmask(op, 0b11000111) == 0b01000110 => { self.assemble_ld(op) }, // LD r, (HL)
-            op if utils::bitmask(op, 0b11111111) == 0b11011101 => { self.assemble_ld(op) }, // LD r, (IX+d)
-            op if utils::bitmask(op, 0b11111111) == 0b11111101 => { self.assemble_ld(op) }, // LD r, (IY+d)
-            op if utils::bitmask(op, 0b11111000) == 0b01110000 => { self.assemble_ld(op) }, // LD (HL), r
-            op if utils::bitmask(op, 0b11111111) == 0b11011101 => { self.assemble_ld(op) }, // LD (IX+d), r
-            op if utils::bitmask(op, 0b11111111) == 0b11111101 => { self.assemble_ld(op) }, // LD (IY+d), r
+            op if utils::bitmask(op, 0b11000000) == 0b01000000 => { self.assemble_ld_r_r(op) }, // LD r, r'
+            op if utils::bitmask(op, 0b11000111) == 0b00000110 => { self.assemble_ld_r_n(op) }, // LD r, n
+            op if utils::bitmask(op, 0b11000111) == 0b01000110 => { self.assemble_ld_r_hl(op) }, // LD r, (HL)
+            op if utils::bitmask(op, 0b11111111) == 0b11011101 => { self.handle_prefixes(op) }, // LD r, (IX+d)
+            op if utils::bitmask(op, 0b11111111) == 0b11111101 => { self.handle_prefixes(op) }, // LD r, (IY+d)
+            op if utils::bitmask(op, 0b11111000) == 0b01110000 => { self.assemble_ld_hl_r(op) }, // LD (HL), r
             op if utils::bitmask(op, 0b11111111) == 0b00110110 => { self.assemble_ld(op) }, // LD (HL), n
-            op if utils::bitmask(op, 0b11111111) == 0b11011101 => { self.assemble_ld(op) }, // LD (IX+d), n
-            op if utils::bitmask(op, 0b11111111) == 0b11111101 => { self.assemble_ld(op) }, // LD (IY+d), n
             op if utils::bitmask(op, 0b11111111) == 0b00001010 => { self.assemble_ld(op) }, // LD A, (BC)
             op if utils::bitmask(op, 0b11111111) == 0b00011010 => { self.assemble_ld(op) }, // LD A, (DE)
             op if utils::bitmask(op, 0b11111111) == 0b00111010 => { self.assemble_ld(op) }, // LD A, (nn)
@@ -242,78 +241,137 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
-    pub fn assemble_ld(&self, opcode: u8) -> Instruction {
-        // Special exception for reg (HL) = 0b110
-        if utils::extract_bits(opcode, 0b11000000) == 0b01 {
-            // LD r, r'
-            // LD r, (HL)
-            let dst = utils::extract_bits(opcode, 0b00111000);
-            let dst = Operand {
-                mode: if dst == 0b110 { OperandType::Memory } else { OperandType::Register } ,
-                register: self.register_single_bitmask_to_enum(dst),
-                displacement: 0,
-                ..Default::default()
-            };
+    pub fn handle_prefixes(&self, opcode: u8) -> Instruction {
+        let opcodes = self.peek_bytes(2).expect("Expecting at least one more byte for dd/fd prefix");
 
-            let src = utils::extract_bits(opcode, 0b00000111);
-            let src = Operand {
-                mode: if src == 0b110 { OperandType::Memory } else { OperandType::Register } ,
-                register: self.register_single_bitmask_to_enum(src),
-                displacement: 0,
-                ..Default::default()
-            };
-
-            Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 1, bytes: 1}
-        } else if utils::extract_bits(opcode, 0b11000111) == 0b00000110 {
-            // LD r, n
-            let opcodes = self.peek_bytes(2).unwrap(); // this instruction is 2 bytes
-            let dst = utils::extract_bits(opcodes[0], 0b00111000);
-            let dst = Operand {
-                mode: OperandType::Register,
-                register: self.register_single_bitmask_to_enum(dst),
-                ..Default::default()
-            };
-
-            let src = opcodes[1];
-            let src = Operand {
-                mode: OperandType::Immediate,
-                value: src as u16,
-                displacement: 0,
-                ..Default::default()
-            };
-
-            Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 2, bytes: 2}
-        } else if opcode == 0b11011101 || opcode == 0b11111101 {
-            // LD r, (IX+d)
-            // LD r, (IY+d)
-            let opcodes = self.peek_bytes(3).unwrap(); // this instruction is 3 bytes
-            let displacement = opcodes[2];
-            let dst = utils::extract_bits(opcodes[1], 0b00111000);
-            let dst = Operand {
-                mode: OperandType::Register,
-                register: self.register_single_bitmask_to_enum(dst),
-                displacement: 0,
-                ..Default::default()
-            };
-
-            // handle IX, IY
-            let src = match opcode {
-                0b11011101 => { Register::RegIX },
-                0b11111101 => { Register::RegIY },
-                _ => { panic!("unknown register in ld"); }
-            };
-            let src = Operand {
-                mode: OperandType::Memory,
-                register: src,
-                displacement: utils::u8_to_i16(displacement),
-                ..Default::default()
-            };
-
-            Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 5, bytes: 3}
-        } else {
-            panic!("unknown ld {:x}", opcode);
+        match opcodes[1] {
+            0xdd => { self.assemble_nop() },
+            0xfd => { self.assemble_nop() },
+            0xcb => { panic!("unimplemented cb prefix"); },
+            op if utils::bitmask(op, 0b11_000_111) == 0b01_000_110 => { self.assemble_ld_r_ix_iy(opcode) }
+            op if utils::bitmask(op, 0b11_111_000) == 0b01_110_000 => { self.assemble_ld_ix_iy_r(opcode) }
+            _    => { panic!("unknown prefix instruction"); }
         }
+    }
 
+    pub fn assemble_nop(&self) -> Instruction {
+        let op1 = Operand { ..Default::default() }; // blank operand
+        let op2 = Operand { ..Default::default() }; // blank operand
+        Instruction { function: OpCode::NOP, cycles: 1, bytes: 1, operand1: op1, operand2: op2 }
+    }
+
+    pub fn assemble_ld_r_r(&self, opcode: u8) -> Instruction {
+        // LD r, r'
+        // LD r, (HL)
+        // LD (HL), r
+        let dst = utils::extract_bits(opcode, 0b00111000);
+        let dst = Operand {
+            mode: if dst == 0b110 { OperandType::Memory } else { OperandType::Register } ,
+            register: self.register_single_bitmask_to_enum(dst),
+            displacement: 0,
+            ..Default::default()
+        };
+
+        let src = utils::extract_bits(opcode, 0b00000111);
+        let src = Operand {
+            mode: if src == 0b110 { OperandType::Memory } else { OperandType::Register } ,
+            register: self.register_single_bitmask_to_enum(src),
+            displacement: 0,
+            ..Default::default()
+        };
+
+        Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 1, bytes: 1}
+    }
+
+    pub fn assemble_ld_r_hl(&self, opcode: u8) -> Instruction {
+        self.assemble_ld_r_r(opcode)
+    }
+
+    pub fn assemble_ld_hl_r(&self, opcode: u8) -> Instruction {
+        self.assemble_ld_r_r(opcode)
+    }
+
+    pub fn assemble_ld_r_n(&self, opcode: u8) -> Instruction {
+        // LD r, n
+        let opcodes = self.peek_bytes(2).unwrap(); // this instruction is 2 bytes
+        let dst = utils::extract_bits(opcodes[0], 0b00111000);
+        let dst = Operand {
+            mode: OperandType::Register,
+            register: self.register_single_bitmask_to_enum(dst),
+            ..Default::default()
+        };
+
+        let src = opcodes[1];
+        let src = Operand {
+            mode: OperandType::Immediate,
+            value: src as u16,
+            displacement: 0,
+            ..Default::default()
+        };
+
+        Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 2, bytes: 2}
+    }
+
+    pub fn assemble_ld_r_ix_iy(&self, opcode: u8) -> Instruction {
+        // LD r, (IX+d)
+        // LD r, (IY+d)
+        let opcodes = self.peek_bytes(3).unwrap(); // this instruction is 3 bytes
+        let displacement = opcodes[2];
+        let dst = utils::extract_bits(opcodes[1], 0b00111000);
+        let dst = Operand {
+            mode: OperandType::Register,
+            register: self.register_single_bitmask_to_enum(dst),
+            displacement: 0,
+            ..Default::default()
+        };
+
+        // handle IX, IY
+        let src = match opcode {
+            0b11011101 => { Register::RegIX },
+            0b11111101 => { Register::RegIY },
+            _ => { panic!("unknown register in ld"); }
+        };
+        let src = Operand {
+            mode: OperandType::Memory,
+            register: src,
+            displacement: utils::u8_to_i16(displacement),
+            ..Default::default()
+        };
+
+        Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 5, bytes: 3}
+    }
+
+    pub fn assemble_ld_ix_iy_r(&self, opcode: u8) -> Instruction {
+        // LD (IX+d), r
+        // LD (IY+d), r
+        let opcodes = self.peek_bytes(3).unwrap(); // this instruction is 3 bytes
+        let displacement = opcodes[2];
+        let src = utils::extract_bits(opcodes[1], 0b00000111);
+        let src = Operand {
+            mode: OperandType::Register,
+            register: self.register_single_bitmask_to_enum(src),
+            displacement: 0,
+            ..Default::default()
+        };
+
+        // handle IX, IY
+        let dst = match opcode {
+            0b11011101 => { Register::RegIX },
+            0b11111101 => { Register::RegIY },
+            _ => { panic!("unknown register in ld"); }
+        };
+        let dst = Operand {
+            mode: OperandType::Memory,
+            register: dst,
+            displacement: utils::u8_to_i16(displacement),
+            ..Default::default()
+        };
+
+        Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 5, bytes: 3}
+    }
+
+    pub fn assemble_ld(&self, opcode: u8) -> Instruction {
+        panic!("unknown ld {:x}", opcode);
     }
 
     fn peek_bytes(&self, num_bytes: usize) -> Result<&[u8], CpuError> {
@@ -337,7 +395,7 @@ mod tests {
     use cpu::Cpu;
     #[test]
     fn test_ld_r_r() {
-        let bytes = vec![0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47];
+        let bytes = vec![0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x70];
         let mut processor: Cpu = Cpu::new(&bytes);
         assert_eq!(format!("{}", processor.consume_instruction()), "LD B, B");
         assert_eq!(format!("{}", processor.consume_instruction()), "LD B, C");
@@ -347,6 +405,7 @@ mod tests {
         assert_eq!(format!("{}", processor.consume_instruction()), "LD B, L");
         assert_eq!(format!("{}", processor.consume_instruction()), "LD B, (HL)");
         assert_eq!(format!("{}", processor.consume_instruction()), "LD B, A");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD (HL), B");
     }
 
     #[test]
@@ -355,5 +414,25 @@ mod tests {
         let mut processor: Cpu = Cpu::new(&bytes);
         assert_eq!(format!("{}", processor.consume_instruction()), "LD D, 50");
         assert_eq!(format!("{}", processor.consume_instruction()), "LD D, 127");
+    }
+
+    #[test]
+    fn test_ld_r_ix_iy() {
+        let bytes = vec![0xdd, 0x46, 0xff, 0xdd, 0x46, 0x7f, 0xfd, 0x46, 0xff, 0xfd, 0x46, 0x7f];
+        let mut processor: Cpu = Cpu::new(&bytes);
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, (IX-1)");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, (IX+127)");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, (IY-1)");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, (IY+127)");
+    }
+
+    #[test]
+    fn test_ld_ix_iy_r() {
+        let bytes = vec![0xdd, 0x77, 0x7f, 0xfd, 0x77, 0x7f, 0xdd, 0x77, 0xff, 0xfd, 0x77, 0xff];
+        let mut processor: Cpu = Cpu::new(&bytes);
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD (IX+127), A");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD (IY+127), A");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD (IX-1), A");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD (IY-1), A");
     }
 }
