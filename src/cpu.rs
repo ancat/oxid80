@@ -161,28 +161,6 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
-    pub fn bogus_shit(&self) -> Instruction {
-        let operand1 = Operand {
-            mode: OperandType::Register,
-            register: Register::RegA,
-            ..Default::default()
-        };
-
-        let operand2 = Operand {
-            mode: OperandType::Register,
-            register: Register::RegB,
-            ..Default::default()
-        };
-
-        Instruction {
-            function: OpCode::ADC,
-            operand1: operand1,
-            operand2: operand2,
-            bytes: 1,
-            cycles: 2,
-        }
-    }
-
     pub fn consume_instruction(&mut self) -> Instruction {
         let instruction = self.fetch_instruction();
         self.reg_pc += instruction.bytes as u16;
