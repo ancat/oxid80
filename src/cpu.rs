@@ -182,7 +182,10 @@ impl<'cool> Cpu<'cool> {
             op if utils::bitmask(op, 0b11000111) == 0b00000110 => { self.assemble_ld_r_n(op) }, // LD r, n
             op if utils::bitmask(op, 0b11000111) == 0b01000110 => { self.assemble_ld_r_hl(op) }, // LD r, (HL)
             op if utils::bitmask(op, 0b11111111) == 0b11011101 => { self.handle_prefixes(op) }, // LD r, (IX+d)
+                                                                                                // LD IX, nn
+
             op if utils::bitmask(op, 0b11111111) == 0b11111101 => { self.handle_prefixes(op) }, // LD r, (IY+d)
+                                                                                                // LD IY, nn
             op if utils::bitmask(op, 0b11111000) == 0b01110000 => { self.assemble_ld_hl_r(op) }, // LD (HL), r
             op if utils::bitmask(op, 0b11111111) == 0b00110110 => { self.assemble_ld_hl_n(op) }, // LD (HL), n
             op if utils::bitmask(op, 0b11111111) == 0b00001010 => { self.assemble_ld_a_rp(op) }, // LD A, (BC)
@@ -192,9 +195,14 @@ impl<'cool> Cpu<'cool> {
             op if utils::bitmask(op, 0b11111111) == 0b00010010 => { self.assemble_ld_rp_a(op) }, // LD (DE), A
             op if utils::bitmask(op, 0b11111111) == 0b00110010 => { self.assemble_ld_nn_a(op) }, // LD (nn), A
             op if utils::bitmask(op, 0b11111111) == 0b11101101 => { self.handle_ed_prefix(op) }, // LD A, I
-            op if utils::bitmask(op, 0b11111111) == 0b11101101 => { self.handle_ed_prefix(op) }, // LD A, R
-            op if utils::bitmask(op, 0b11111111) == 0b11101101 => { self.handle_ed_prefix(op) }, // LD I, A
-            op if utils::bitmask(op, 0b11111111) == 0b11101101 => { self.handle_ed_prefix(op) }, // LD R, A
+                                                                                                 // LD A, R
+                                                                                                 // LD I, A
+                                                                                                 // LD R, A
+                                                                                                 // LD dd, (nn)
+
+            op if utils::bitmask(op, 0b11001111) == 0b00000001 => { self.assemble_ld_dd_nn(op) }, // LD dd, nn
+            op if utils::bitmask(op, 0b11111111) == 0b00101010 => { self.assemble_ld_hl_nn(op) }, // LD HL, (nn)
+
             opcode => { panic!("unknown {:x}", opcode); }
         }
     }
@@ -283,6 +291,14 @@ impl<'cool> Cpu<'cool> {
         };
 
         Instruction { function: OpCode::LD, cycles: 4, bytes: 3, operand1: dst, operand2: src }
+    }
+
+    fn assemble_ld_hl_nn(&self, opcode: u8) -> Instruction {
+        panic!("ld dd nn not implemented yet");
+    }
+
+    fn assemble_ld_dd_nn(&self, opcode: u8) -> Instruction {
+        panic!("ld dd nn not implemented yet");
     }
 
     fn assemble_ld_a_nn(&self, opcode: u8) -> Instruction {
