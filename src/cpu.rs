@@ -50,7 +50,7 @@ impl fmt::Display for Register {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum OpCode {
     LD,
     INC,
@@ -60,8 +60,7 @@ pub enum OpCode {
     NOP
 }
 
-#[derive(Debug)]
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 enum OperandType {
     Register,
     Memory,
@@ -149,6 +148,22 @@ impl fmt::Display for Instruction {
 pub struct Cpu<'cool> {
     raw_bytes: &'cool [u8],
     reg_pc: u16,
+    reg_a: u8,
+    reg_b: u8,
+    reg_c: u8,
+    reg_d: u8,
+    reg_e: u8,
+    reg_f: u8,
+    reg_h: u8,
+    reg_l: u8,
+    reg_i: u8,
+    reg_r: u8,
+    reg_bc: u16,
+    reg_de: u16,
+    reg_hl: u16,
+    reg_ix: u16,
+    reg_iy: u16,
+    reg_sp: u16,
     cycles: u64,
 }
 
@@ -157,15 +172,78 @@ impl<'cool> Cpu<'cool> {
         Cpu {
             raw_bytes: raw_bytes,
             reg_pc: 0,
+            reg_a: 0,
+            reg_b: 0,
+            reg_c: 0,
+            reg_d: 0,
+            reg_e: 0,
+            reg_f: 0,
+            reg_h: 0,
+            reg_l: 0,
+            reg_i: 0,
+            reg_r: 0,
+            reg_bc: 0,
+            reg_de: 0,
+            reg_hl: 0,
+            reg_ix: 0,
+            reg_iy: 0,
+            reg_sp: 0,
             cycles: 0,
         }
     }
 
     pub fn consume_instruction(&mut self) -> Instruction {
         let instruction = self.fetch_instruction();
+        /*
+            it's alive!
+
+            reg_a: 0; reg_b: 0; reg_c: 0;
+            LD A, 65 (2 bytes)
+            reg_a: 41; reg_b: 0; reg_c: 0;
+            LD B, A (1 bytes)
+            reg_a: 41; reg_b: 41; reg_c: 0;
+            LD C, B (1 bytes)
+            reg_a: 41; reg_b: 41; reg_c: 41;
+            LD A, 0 (2 bytes)
+            reg_a: 0; reg_b: 41; reg_c: 41;
+        */
+        if instruction.function == OpCode::LD {
+            let operand1 = &instruction.operand1;
+            let operand2 = &instruction.operand2;
+            let src;
+
+            if operand2.mode == OperandType::Register {
+                src = match operand2.register {
+                    Register::RegA => { self.reg_a },
+                    Register::RegB => { self.reg_b },
+                    Register::RegC => { self.reg_c },
+                    _ => { 420 }
+                };
+            } else if operand2.mode == OperandType::Immediate {
+                src = operand2.value as u8;
+            } else {
+                src = 421;
+            }
+
+            if operand1.mode == OperandType::Register {
+                match operand1.register {
+                    Register::RegA => { self.reg_a = src; },
+                    Register::RegB => { self.reg_b = src; },
+                    Register::RegC => { self.reg_c = src; },
+                    _ => { 420; }
+                };
+            }
+        } else {
+            panic!("can't execute dis {:?}", instruction.function);
+        }
+
         self.reg_pc += instruction.bytes as u16;
         self.cycles += instruction.cycles as u64;
         instruction
+    }
+
+    pub fn print_regs(&self) -> () {
+        println!("reg_a: {:x}; reg_b: {:x}; reg_c: {:x};", self.reg_a, self.reg_b, self.reg_c);
     }
 
     pub fn fetch_instruction(&self) -> Instruction {

@@ -33,6 +33,7 @@ fn main() -> () {
     let mut processor: cpu::Cpu = cpu::Cpu::new(&bytes);
 
     for _ in 0..5 {
+        processor.print_regs();
         let instruction = processor.consume_instruction();
         println!("{} ({} bytes)", instruction, instruction.bytes);
     }
