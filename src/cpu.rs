@@ -175,8 +175,8 @@ impl<'cool> Cpu<'cool> {
             _ => panic!("out of bytes")
         };
 
-        // TODO: all LD IX/IY instructions start with the same opcode. need to defer opcode
-        // checking deeper into the disassembling stage
+        // TODO: make all ed/dd/fd prefixed instructions call the non-prefixed functions
+        // but with a flag so we know it's prefixed (if flag, use IX/IY instead...)
         match op {
             op if utils::bitmask(op, 0b11000000) == 0b01000000 => { self.assemble_ld_r_r(op) }, // LD r, r'
             op if utils::bitmask(op, 0b11000111) == 0b00000110 => { self.assemble_ld_r_n(op) }, // LD r, n
@@ -202,7 +202,7 @@ impl<'cool> Cpu<'cool> {
 
             op if utils::bitmask(op, 0b11001111) == 0b00000001 => { self.assemble_ld_dd_nn(op) }, // LD dd, nn
             op if utils::bitmask(op, 0b11111111) == 0b00101010 => { self.assemble_ld_hl_nn(op) }, // LD HL, (nn)
-
+            op if utils::bitmask(op, 0b11111111) == 0b00100010 => { self.assemble_nn_mem_hl(op) },
             opcode => { panic!("unknown {:x}", opcode); }
         }
     }
@@ -229,6 +229,25 @@ impl<'cool> Cpu<'cool> {
             0b11 => { Register::RegSP },
             _    => { panic!("unknown register pair bitmask"); }
         }
+    }
+
+    fn assemble_nn_mem_hl(&self, opcode: u8) -> Instruction {
+        let opcodes = self.peek_bytes(3).expect("Expecting 3 bytes for LD HL, (nn)");
+
+        let dst: u16 = ((opcodes[2] as u16) << 8) | (opcodes[1] as u16);
+        let dst = Operand {
+            mode: OperandType::Memory,
+            value: dst,
+            ..Default::default()
+        };
+
+        let src = Operand {
+            mode: OperandType::Register,
+            register: Register::RegHL,
+            ..Default::default()
+        };
+
+        Instruction { function: OpCode::LD, cycles: 5, bytes: 3, operand1: dst, operand2: src }
     }
 
     fn assemble_ld_a_rp(&self, opcode: u8) -> Instruction {
@@ -351,6 +370,35 @@ impl<'cool> Cpu<'cool> {
 
     pub fn handle_ed_prefix(&self, opcode: u8) -> Instruction {
         let opcodes = self.peek_bytes(2).expect("Expecting 2 bytes for an ED prefixed instruction");
+        match opcodes[1]  {
+            opcode if opcodes[1] & 0b11001111 == 0b01001011 => { self.assemble_ld_dd_nn_mem(opcode) },
+            _ => self.handle_ld_a_i_r(opcode)
+        }
+    }
+
+    pub fn assemble_ld_dd_nn_mem(&self, opcode: u8) -> Instruction {
+        let opcodes = self.peek_bytes(4).expect("Expecting 3 bytes for LD dd, (nn)");
+        let dst = utils::extract_bits(opcodes[1], 0b00110000);
+        let dst = self.register_pair_bitmask_to_enum(dst);
+        let dst = Operand {
+            mode: OperandType::Register,
+            register: dst,
+            ..Default::default()
+        };
+
+        let src: u16 = ((opcodes[3] as u16) << 8) | (opcodes[2] as u16);
+        let src = Operand {
+            mode: OperandType::Memory,
+            value: src,
+            ..Default::default()
+        };
+
+        Instruction { function: OpCode::LD, cycles: 6, bytes: 4, operand1: dst, operand2: src }
+    }
+
+    pub fn handle_ld_a_i_r(&self, opcode: u8) -> Instruction {
+        let opcodes = self.peek_bytes(2).expect("Expecting 2 bytes for an ED prefixed instruction");
+
         let reg_a = Operand {
             mode: OperandType::Register,
             register: Register::RegA,
@@ -394,10 +442,34 @@ impl<'cool> Cpu<'cool> {
             0xcb => { panic!("unimplemented cb prefix"); },
             0x36 => { self.assemble_ld_ix_iy_n(opcode) },
             0x21 => { self.assemble_ld_ix_iy_nn(opcode) },
+            0x2a => { self.assemble_ld_ix_iy_nn_mem(opcode) },
             op if utils::bitmask(op, 0b11_000_111) == 0b01_000_110 => { self.assemble_ld_r_ix_iy(opcode) },
             op if utils::bitmask(op, 0b11_111_000) == 0b01_110_000 => { self.assemble_ld_ix_iy_r(opcode) },
             whatsthis    => { panic!("unknown byte for dd prefix: {:x}", whatsthis); }
         }
+    }
+
+    pub fn assemble_ld_ix_iy_nn_mem(&self, opcode: u8) -> Instruction {
+        let opcodes = self.peek_bytes(4).expect("expects 4 bytes");
+
+        let dst = match opcodes[0] {
+            0xdd => Register::RegIX,
+            0xfd => Register::RegIY,
+            byte => panic!("unknown instruction 0x{:x} in ld_ix_iy_nn_mem", byte)
+        };
+        let dst = Operand {
+            mode: OperandType::Register,
+            register: dst,
+            ..Default::default()
+        };
+
+        let src = Operand {
+            mode: OperandType::Memory,
+            value: ((opcodes[3] as u16) << 8) | (opcodes[2] as u16),
+            ..Default::default()
+        };
+
+        Instruction { function: OpCode::LD, cycles: 6, bytes: 4, operand1: dst, operand2: src }
     }
 
     pub fn assemble_ld_ix_iy_nn(&self, opcode: u8) -> Instruction {
@@ -720,5 +792,29 @@ mod tests {
         let mut processor: Cpu = Cpu::new(&bytes);
         assert_eq!(format!("{}", processor.consume_instruction()), "LD HL, (16705)");
         assert_eq!(format!("{}", processor.consume_instruction()), "LD HL, (0)");
+    }
+
+    #[test]
+    fn test_handle_ed_dd_nn() {
+        let bytes = vec![0xed, 0x7b, 0x00, 0x00, 0xed, 0x6b, 0x11, 0x22];
+        let mut processor: Cpu = Cpu::new(&bytes);
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD SP, (0)");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD HL, (8721)");
+    }
+
+    #[test]
+    fn test_assemble_dd_ix_nn() {
+        let bytes = vec![0xdd, 0x2a, 0x00, 0x00, 0xfd, 0x2a, 0x01, 0x00];
+        let mut processor: Cpu = Cpu::new(&bytes);
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD IX, (0)");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD IY, (1)");
+    }
+
+    #[test]
+    fn test_ld_nn_mem_hl() {
+        let bytes = vec![0x22, 0x01, 0x00, 0x22, 0x00, 0x00];
+        let mut processor: Cpu = Cpu::new(&bytes);
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD (1), HL");
+        assert_eq!(format!("{}", processor.consume_instruction()), "LD (0), HL");
     }
 }
