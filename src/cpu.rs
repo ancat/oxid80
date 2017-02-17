@@ -97,7 +97,7 @@ pub struct Instruction {
     operand1: Operand,
     operand2: Operand,
     cycles: i8,
-    pub bytes: u8,
+    pub bytes: usize,
 }
 
 impl Instruction {
@@ -167,6 +167,17 @@ pub struct Cpu<'cool> {
     cycles: u64,
 }
 
+impl<'cool> Iterator for Cpu<'cool> {
+    type Item = Instruction;
+
+    fn next(&mut self) -> Option<Instruction> {
+        match self.fetch_instruction() {
+            Ok(instr) => { self.consume_bytes(instr.bytes); Some(instr) },
+            Err(e) => { None }
+        }
+    }
+}
+
 impl<'cool> Cpu<'cool> {
     pub fn new (raw_bytes: &[u8]) -> Cpu {
         Cpu {
@@ -192,8 +203,7 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
-    pub fn consume_instruction(&mut self) -> Instruction {
-        let instruction = self.fetch_instruction();
+    pub fn consume_instruction(&mut self, instruction: Instruction) -> Instruction {
         /*
             it's alive!
 
@@ -246,16 +256,18 @@ impl<'cool> Cpu<'cool> {
         println!("reg_a: {:x}; reg_b: {:x}; reg_c: {:x};", self.reg_a, self.reg_b, self.reg_c);
     }
 
-    pub fn fetch_instruction(&self) -> Instruction {
+    pub fn fetch_instruction(&self) -> Result<Instruction, CpuError> {
         // also: a bunch of ld instructions have the same starting byte
-        let op = match self.peek_bytes(1) {
-            Ok(e) => { e[0] },
-            _ => panic!("out of bytes")
-        };
+        let op = self.peek_bytes(1);
+        if !op.is_ok() {
+            return Err(CpuError::OutOfBytes);
+        }
+
+        let op = op.unwrap()[0];
 
         // TODO: make all ed/dd/fd prefixed instructions call the non-prefixed functions
         // but with a flag so we know it's prefixed (if flag, use IX/IY instead...)
-        match op {
+        let parsed_instruction: Instruction = match op {
             op if utils::bitmask(op, 0b11000000) == 0b01000000 => { self.assemble_ld_r_r(op) }, // LD r, r'
             op if utils::bitmask(op, 0b11000111) == 0b00000110 => { self.assemble_ld_r_n(op) }, // LD r, n
             op if utils::bitmask(op, 0b11000111) == 0b01000110 => { self.assemble_ld_r_hl(op) }, // LD r, (HL)
@@ -282,7 +294,9 @@ impl<'cool> Cpu<'cool> {
             op if utils::bitmask(op, 0b11111111) == 0b00101010 => { self.assemble_ld_hl_nn(op) }, // LD HL, (nn)
             op if utils::bitmask(op, 0b11111111) == 0b00100010 => { self.assemble_nn_mem_hl(op) },
             opcode => { panic!("unknown {:x}", opcode); }
-        }
+        };
+
+        Ok(parsed_instruction)
     }
 
     fn register_single_bitmask_to_enum(&self, mask: u8) -> Register {
@@ -734,9 +748,8 @@ impl<'cool> Cpu<'cool> {
         Ok(&self.raw_bytes[start..end])
     }
 
-    fn consume_bytes(&mut self, num_bytes: usize) -> Result<&[u8], CpuError> {
+    fn consume_bytes(&mut self, num_bytes: usize) -> () {
         self.reg_pc += num_bytes as u16;
-        self.peek_bytes(num_bytes)
     }
 }
 
@@ -747,152 +760,152 @@ mod tests {
     fn test_ld_r_r() {
         let bytes = vec![0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x70];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, B");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, C");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, D");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, E");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, H");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, L");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, (HL)");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, A");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (HL), B");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD B, B");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD B, C");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD B, D");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD B, E");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD B, H");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD B, L");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD B, (HL)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD B, A");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (HL), B");
     }
 
     #[test]
     fn test_ld_r_n() {
         let bytes = vec![0x16, 0x32, 0x16, 0x7f];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD D, 50");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD D, 127");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD D, 50");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD D, 127");
     }
 
     #[test]
     fn test_ld_r_ix_iy() {
         let bytes = vec![0xdd, 0x46, 0xff, 0xdd, 0x46, 0x7f, 0xfd, 0x46, 0xff, 0xfd, 0x46, 0x7f];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, (IX-1)");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, (IX+127)");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, (IY-1)");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD B, (IY+127)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD B, (IX-1)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD B, (IX+127)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD B, (IY-1)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD B, (IY+127)");
     }
 
     #[test]
     fn test_ld_ix_iy_r() {
         let bytes = vec![0xdd, 0x77, 0x7f, 0xfd, 0x77, 0x7f, 0xdd, 0x77, 0xff, 0xfd, 0x77, 0xff];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (IX+127), A");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (IY+127), A");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (IX-1), A");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (IY-1), A");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (IX+127), A");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (IY+127), A");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (IX-1), A");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (IY-1), A");
     }
 
     #[test]
     fn test_ld_hl_n() {
         let bytes = vec![0x36, 0xff, 0x36, 0x7f];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (HL), 255");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (HL), 127");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (HL), 255");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (HL), 127");
     }
 
     #[test]
     fn test_ld_ix_iy_n() {
         let bytes = vec![0xdd, 0x36, 0xff, 0xff, 0xfd, 0x36, 0x7f, 0xff];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (IX-1), 255");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (IY+127), 255");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (IX-1), 255");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (IY+127), 255");
     }
 
     #[test]
     fn test_ld_a_rp() {
         let bytes = vec![0x0a, 0x1a];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD A, (BC)");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD A, (DE)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD A, (BC)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD A, (DE)");
     }
 
     #[test]
     fn test_ld_rp_a() {
         let bytes = vec![0x02, 0x12];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (BC), A");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (DE), A");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (BC), A");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (DE), A");
     }
 
     #[test]
     fn test_ld_a_nn() {
         let bytes = vec![0x3a, 0x41, 0x41, 0x3a, 0x0, 0x0, 0x3a, 0xff, 0xff];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD A, (16705)");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD A, (0)");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD A, (65535)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD A, (16705)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD A, (0)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD A, (65535)");
     }
 
     #[test]
     fn test_ld_nn_a() {
         let bytes = vec![0x32, 0x41, 0x41, 0x32, 0x0, 0x0, 0x32, 0xff, 0xff];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (16705), A");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (0), A");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (65535), A");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (16705), A");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (0), A");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (65535), A");
     }
 
     #[test]
     fn test_handle_ed_prefix() {
         let bytes = vec![0xed, 0x57, 0xed, 0x5f, 0xed, 0x47, 0xed, 0x4f];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD A, I");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD A, R");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD I, A");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD R, A");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD A, I");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD A, R");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD I, A");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD R, A");
     }
 
     #[test]
     fn test_assemble_ld_dd_nn() {
         let bytes = vec![0x31, 0x41, 0x41, 0x21, 0xff, 0xff];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD SP, 16705");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD HL, 65535");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD SP, 16705");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD HL, 65535");
     }
 
     #[test]
     fn test_assemble_ld_ix_iy_nn() {
         let bytes = vec![0xdd, 0x21, 0x41, 0x41, 0xdd, 0x21, 0xff, 0xff, 0xfd, 0x21, 0xff, 0xff, 0xfd, 0x21, 0x00, 0x00];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD IX, 16705");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD IX, 65535");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD IY, 65535");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD IY, 0");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD IX, 16705");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD IX, 65535");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD IY, 65535");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD IY, 0");
     }
 
     #[test]
     fn test_assemble_ld_hl_nn() {
         let bytes = vec![0x2a, 0x41, 0x41, 0x2a, 0x00, 0x00];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD HL, (16705)");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD HL, (0)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD HL, (16705)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD HL, (0)");
     }
 
     #[test]
     fn test_handle_ed_dd_nn() {
         let bytes = vec![0xed, 0x7b, 0x00, 0x00, 0xed, 0x6b, 0x11, 0x22];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD SP, (0)");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD HL, (8721)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD SP, (0)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD HL, (8721)");
     }
 
     #[test]
     fn test_assemble_dd_ix_nn() {
         let bytes = vec![0xdd, 0x2a, 0x00, 0x00, 0xfd, 0x2a, 0x01, 0x00];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD IX, (0)");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD IY, (1)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD IX, (0)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD IY, (1)");
     }
 
     #[test]
     fn test_ld_nn_mem_hl() {
         let bytes = vec![0x22, 0x01, 0x00, 0x22, 0x00, 0x00];
         let mut processor: Cpu = Cpu::new(&bytes);
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (1), HL");
-        assert_eq!(format!("{}", processor.consume_instruction()), "LD (0), HL");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (1), HL");
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD (0), HL");
     }
 }
