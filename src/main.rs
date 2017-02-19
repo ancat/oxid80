@@ -33,7 +33,7 @@ fn main() -> () {
     let mut processor: cpu::Cpu = cpu::Cpu::new(&bytes);
 
     processor.print_regs();
-    for _ in 0..5 {
+    loop {
         let instruction = processor.next();
         if !instruction.is_some() {
             break;

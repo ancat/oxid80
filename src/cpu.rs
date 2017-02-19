@@ -243,6 +243,31 @@ impl<'cool> Cpu<'cool> {
                     _ => { 420; }
                 };
             }
+        } else if instruction.function == OpCode::ADD {
+            // TODO: flags
+            let operand1 = &instruction.operand1;
+            let operand2 = &instruction.operand2;
+
+            let src = match operand2.mode {
+                OperandType::Immediate => operand2.value as u8,
+                OperandType::Register => match operand2.register {
+                    Register::RegA => { self.reg_a },
+                    Register::RegB => { self.reg_b },
+                    Register::RegC => { self.reg_c },
+                    _ => { 42 } // blaze it
+                },
+                OperandType::Memory => 42,
+                _ => panic!("unsupported")
+            };
+
+            if operand1.mode == OperandType::Register {
+                match operand1.register {
+                    Register::RegA => { self.reg_a += src; },
+                    Register::RegB => { self.reg_b += src; },
+                    Register::RegC => { self.reg_c += src; },
+                    _ => { 42; } // blaze it
+                };
+            }
         } else {
             panic!("can't execute dis {:?}", instruction.function);
         }
@@ -293,6 +318,9 @@ impl<'cool> Cpu<'cool> {
             op if utils::bitmask(op, 0b11001111) == 0b00000001 => { self.assemble_ld_dd_nn(op) }, // LD dd, nn
             op if utils::bitmask(op, 0b11111111) == 0b00101010 => { self.assemble_ld_hl_nn(op) }, // LD HL, (nn)
             op if utils::bitmask(op, 0b11111111) == 0b00100010 => { self.assemble_nn_mem_hl(op) },
+
+            op if utils::bitmask(op, 0b11111000) == 0b10000000 => { self.assemble_add_a_r(op) },
+            op if utils::bitmask(op, 0b11111111) == 0b11000110 => { self.assemble_add_a_n(op) },
             opcode => { panic!("unknown {:x}", opcode); }
         };
 
@@ -734,6 +762,41 @@ impl<'cool> Cpu<'cool> {
         Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 5, bytes: 3}
     }
 
+    pub fn assemble_add_a_r(&self, opcode: u8) -> Instruction {
+        let src = opcode & 0b111;
+        let src = Operand {
+            mode: OperandType::Register,
+            register: self.register_single_bitmask_to_enum(src),
+            ..Default::default()
+        };
+
+        let dst = Operand {
+            mode: OperandType::Register,
+            register: Register::RegA,
+            ..Default::default()
+        };
+
+        return Instruction { function: OpCode::ADD, operand1: dst, operand2: src, cycles: 1, bytes: 1 }
+    }
+
+    pub fn assemble_add_a_n(&self, opcode: u8) -> Instruction {
+        let opcodes = self.peek_bytes(2).unwrap();
+        let src = opcodes[1] as u16;
+        let src = Operand {
+            mode: OperandType::Immediate,
+            value: src,
+            ..Default::default()
+        };
+
+        let dst = Operand {
+            mode: OperandType::Register,
+            register: Register::RegA,
+            ..Default::default()
+        };
+
+        return Instruction { function: OpCode::ADD, operand1: dst, operand2: src, cycles: 2, bytes: 2 }
+    }
+
     pub fn assemble_ld(&self, opcode: u8) -> Instruction {
         panic!("unknown ld {:x}", opcode);
     }
@@ -904,5 +967,20 @@ mod tests {
         let mut processor: Cpu = Cpu::new(&bytes);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (1), HL");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (0), HL");
+    }
+
+    #[test]
+    fn test_add_a_r() {
+        let bytes = vec![0x80, 0x87];
+        let mut processor: Cpu = Cpu::new(&bytes);
+        assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, B");
+        assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, A");
+    }
+
+    #[test]
+    fn test_add_a_n() {
+        let bytes = vec![0xc6, 0x41];
+        let mut processor: Cpu = Cpu::new(&bytes);
+        assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, 65");
     }
 }
