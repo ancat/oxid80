@@ -172,7 +172,7 @@ impl<'cool> Iterator for Cpu<'cool> {
 
     fn next(&mut self) -> Option<Instruction> {
         match self.fetch_instruction() {
-            Ok(instr) => { self.consume_bytes(instr.bytes); Some(instr) },
+            Ok(instr) => { self.consume_instruction(&instr); Some(instr) },
             Err(e) => { None }
         }
     }
@@ -203,7 +203,7 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
-    pub fn consume_instruction(&mut self, instruction: Instruction) -> Instruction {
+    pub fn consume_instruction<'wat> (&mut self, instruction: &'wat Instruction) -> &'wat Instruction {
         /*
             it's alive!
 
@@ -739,6 +739,7 @@ impl<'cool> Cpu<'cool> {
     }
 
     fn peek_bytes(&self, num_bytes: usize) -> Result<&[u8], CpuError> {
+        // println!("PEEK: {:x} - {:x} < {:x}", self.raw_bytes.len() as u16, self.reg_pc, num_bytes as u16);
         if self.raw_bytes.len() as u16 -self.reg_pc < num_bytes as u16 {
             return Err(CpuError::OutOfBytes);
         }
@@ -746,10 +747,6 @@ impl<'cool> Cpu<'cool> {
         let start = self.reg_pc as usize;
         let end = start + num_bytes;
         Ok(&self.raw_bytes[start..end])
-    }
-
-    fn consume_bytes(&mut self, num_bytes: usize) -> () {
-        self.reg_pc += num_bytes as u16;
     }
 }
 

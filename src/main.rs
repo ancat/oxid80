@@ -32,12 +32,16 @@ fn main() -> () {
 
     let mut processor: cpu::Cpu = cpu::Cpu::new(&bytes);
 
-    // TODO: figure this out
-    // can't loop over processor and use it in the body (and the ref to processor isn't iterable D: )
-    for instruction in processor {
-        processor.print_regs();
-        let instruction = processor.consume_instruction(instruction);
+    processor.print_regs();
+    for _ in 0..5 {
+        let instruction = processor.next();
+        if !instruction.is_some() {
+            break;
+        }
+
+        let instruction = instruction.unwrap();
         println!("{} ({} bytes)", instruction, instruction.bytes);
+        processor.print_regs();
     }
 
     exit(0);
