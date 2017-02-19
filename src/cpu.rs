@@ -203,6 +203,38 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
+    fn set_8bit_register_val(&mut self, register: &Register, value: u8) -> () {
+        match *register {
+            Register::RegA => { self.reg_a = value },
+            Register::RegB => { self.reg_b = value },
+            Register::RegC => { self.reg_c = value },
+            Register::RegD => { self.reg_d = value },
+            Register::RegE => { self.reg_e = value },
+            Register::RegF => { self.reg_f = value },
+            Register::RegH => { self.reg_h = value },
+            Register::RegL => { self.reg_l = value },
+            Register::RegI => { self.reg_i = value },
+            Register::RegR => { self.reg_r = value },
+            _ => { /* handle 16 bit */ }
+        }
+    }
+
+    fn get_8bit_register_val(&self, register: &Register) -> u8 {
+        match *register {
+            Register::RegA => self.reg_a,
+            Register::RegB => self.reg_b,
+            Register::RegC => self.reg_c,
+            Register::RegD => self.reg_d,
+            Register::RegE => self.reg_e,
+            Register::RegF => self.reg_f,
+            Register::RegH => self.reg_h,
+            Register::RegL => self.reg_l,
+            Register::RegI => self.reg_i,
+            Register::RegR => self.reg_r,
+            _ => { /*handle 16 bit*/ 0 }
+        }
+    }
+
     pub fn consume_instruction<'wat> (&mut self, instruction: &'wat Instruction) -> &'wat Instruction {
         /*
             it's alive!
@@ -223,12 +255,8 @@ impl<'cool> Cpu<'cool> {
             let src;
 
             if operand2.mode == OperandType::Register {
-                src = match operand2.register {
-                    Register::RegA => { self.reg_a },
-                    Register::RegB => { self.reg_b },
-                    Register::RegC => { self.reg_c },
-                    _ => { 420 }
-                };
+                let op2reg = &operand2.register;
+                src = self.get_8bit_register_val(op2reg);
             } else if operand2.mode == OperandType::Immediate {
                 src = operand2.value as u8;
             } else {
@@ -236,12 +264,8 @@ impl<'cool> Cpu<'cool> {
             }
 
             if operand1.mode == OperandType::Register {
-                match operand1.register {
-                    Register::RegA => { self.reg_a = src; },
-                    Register::RegB => { self.reg_b = src; },
-                    Register::RegC => { self.reg_c = src; },
-                    _ => { 420; }
-                };
+                let op1reg = &operand1.register;
+                self.set_8bit_register_val(op1reg, src);
             }
         } else if instruction.function == OpCode::ADD {
             // TODO: flags
@@ -278,7 +302,7 @@ impl<'cool> Cpu<'cool> {
     }
 
     pub fn print_regs(&self) -> () {
-        println!("reg_a: {:x}; reg_b: {:x}; reg_c: {:x};", self.reg_a, self.reg_b, self.reg_c);
+        println!("reg_a: {:x}; reg_b: {:x}; reg_c: {:x}; reg_d: {:x}; reg_e: {:x}; reg_f: {:x}; reg_h: {:x}; reg_l: {:x}; reg_i: {:x}; reg_r: {:x}", self.reg_a, self.reg_b, self.reg_c, self.reg_d, self.reg_e, self.reg_f, self.reg_h, self.reg_l, self.reg_i, self.reg_r);
     }
 
     pub fn fetch_instruction(&self) -> Result<Instruction, CpuError> {
