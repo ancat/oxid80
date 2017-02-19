@@ -1,8 +1,8 @@
-cool_flags = -A dead_code
-prod_flags = 
+cool_flags = -A dead_code -A unused_variables
+prod_flags =
 
 all:
-	RUSTFLAGS="${cool_flags}" cargo build && mv target/debug/gbc main
+	RUSTFLAGS="${cool_flags}" cargo build 
 
 test:
 	RUSTFLAGS="${cool_flags}" cargo test
