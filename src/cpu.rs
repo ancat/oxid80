@@ -748,10 +748,36 @@ impl<'cool> Cpu<'cool> {
             0xf9 => { self.assemble_ld_sp_ix_iy(opcode) },
             0xe5 => { self.assemble_push_ix_iy(opcode) },
             0xe1 => { self.assemble_pop_ix_iy(opcode) },
+            0x86 => { self.assemble_add_a_ix_iy_d(opcode) },
             op if utils::bitmask(op, 0b11_000_111) == 0b01_000_110 => { self.assemble_ld_r_ix_iy(opcode) },
             op if utils::bitmask(op, 0b11_111_000) == 0b01_110_000 => { self.assemble_ld_ix_iy_r(opcode) },
             whatsthis    => { panic!("unknown byte for dd prefix: {:x}", whatsthis); }
         }
+    }
+
+    fn assemble_add_a_ix_iy_d(&self, opcode: u8) -> Instruction {
+        let opcodes = self.peek_bytes(3).expect("ADD A, (IX/IY+d) requires 3 bytes!");
+        let displacement = opcodes[2];
+
+        let src = match opcode {
+            0b11011101 => { Register::RegIX },
+            0b11111101 => { Register::RegIY },
+            _ => { panic!("unknown register in add a, ix/iy+d"); }
+        };
+        let src = Operand {
+            mode: OperandType::Memory,
+            register: src,
+            displacement: utils::u8_to_i16(displacement),
+            ..Default::default()
+        };
+
+        let dst = Operand {
+            mode: OperandType::Register,
+            register: Register::RegA,
+            ..Default::default()
+        };
+
+        Instruction { function: OpCode::ADD, operand1: dst, operand2: src, cycles: 5, bytes: 3 }
     }
 
     pub fn assemble_ld_nn_mem_ix_iy(&self, opcode: u8) -> Instruction {
@@ -971,9 +997,10 @@ impl<'cool> Cpu<'cool> {
     }
 
     pub fn assemble_add_a_r(&self, opcode: u8) -> Instruction {
+        // if the register is 110, we use (HL) instead of HL
         let src = opcode & 0b111;
         let src = Operand {
-            mode: OperandType::Register,
+            mode: if src == 0b110 { OperandType::Memory } else {  OperandType::Register },
             register: self.register_single_bitmask_to_enum(src),
             ..Default::default()
         };
@@ -1235,5 +1262,14 @@ mod tests {
         let bytes = vec![0xc6, 0x41];
         let mut processor: Cpu = Cpu::new(&bytes);
         assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, 65");
+    }
+
+    #[test]
+    fn test_add_a_hl_mem() {
+        let bytes = vec![0x86, 0xdd, 0x86, 0x41, 0xfd, 0x86, 0x42];
+        let mut processor: Cpu = Cpu::new(&bytes);
+        assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, (HL)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, (IX+65)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, (IY+66)");
     }
 }
