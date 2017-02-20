@@ -68,7 +68,9 @@ pub enum OpCode {
     DEC,
     ADD,
     ADC,
-    NOP
+    NOP,
+    PUSH,
+    POP
 }
 
 #[derive(Debug, PartialEq)]
@@ -144,13 +146,13 @@ impl fmt::Display for Instruction {
         };
 
         let value2: String = match self.operand2.mode {
-            OperandType::Register => format!("{}", self.operand2.register),
-            OperandType::Immediate => format!("{}", self.operand2.value),
-            OperandType::Memory => self.format_memory(&self.operand2),
+            OperandType::Register => format!(", {}", self.operand2.register),
+            OperandType::Immediate => format!(", {}", self.operand2.value),
+            OperandType::Memory => format!(", {}", self.format_memory(&self.operand2)),
             OperandType::None => format!("")
         };
 
-        return write!(f, "{:?} {}, {}", opcode, value1, value2);
+        return write!(f, "{:?} {}{}", opcode, value1, value2);
     }
 
 }
@@ -294,14 +296,18 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
+    pub fn execute_nop(&mut self, instruction: &Instruction) -> () {
+        // do nothing! yay!
+    }
+
     pub fn consume_instruction<'wat> (&mut self, instruction: &'wat Instruction) -> &'wat Instruction {
-        if instruction.function == OpCode::LD {
-            self.execute_ld(instruction);
-        } else if instruction.function == OpCode::ADD {
-            self.execute_add(instruction);
-        } else {
-            panic!("can't execute dis {:?}", instruction.function);
-        }
+        match instruction.function {
+            OpCode::LD   => self.execute_ld(instruction),
+            OpCode::ADD  => self.execute_add(instruction),
+            OpCode::PUSH => self.execute_nop(instruction),
+            OpCode::POP  => self.execute_nop(instruction),
+            _            => { panic!("can't execute dis {:?}", instruction.function); }
+        };
 
         let prev_value = match instruction.operand1.mode {
             OperandType::Register => self.get_8bit_register_val(&instruction.operand1.register),
@@ -365,6 +371,8 @@ impl<'cool> Cpu<'cool> {
             op if utils::bitmask(op, 0b11111000) == 0b10000000 => { self.assemble_add_a_r(op) },
             op if utils::bitmask(op, 0b11111111) == 0b11000110 => { self.assemble_add_a_n(op) },
             op if utils::bitmask(op, 0b11111111) == 0b11111001 => { self.assemble_ld_sp_hl(op) }, // LD SP, HL
+            op if utils::bitmask(op, 0b11001111) == 0b11000101 => { self.assemble_push_qq(op) },
+            op if utils::bitmask(op, 0b11001111) == 0b11000001 => { self.assemble_pop_qq(op) },
             opcode => { panic!("unknown {:x}", opcode); }
         };
 
@@ -393,6 +401,78 @@ impl<'cool> Cpu<'cool> {
             0b11 => { Register::RegSP },
             _    => { panic!("unknown register pair bitmask"); }
         }
+    }
+
+    fn assemble_pop_qq(&self, opcode: u8) -> Instruction {
+        let op1 = utils::extract_bits(opcode, 0b00110000);
+        let op1 = Operand {
+            mode: OperandType::Register,
+            register: self.register_pair_bitmask_to_enum(op1),
+            ..Default::default()
+        };
+
+        let op2 = Operand {
+            mode: OperandType::None,
+            ..Default::default()
+        };
+
+        Instruction { function: OpCode::POP, cycles: 3, bytes: 1, operand1: op1, operand2: op2 }
+    }
+
+    fn assemble_push_qq(&self, opcode: u8) -> Instruction {
+        let op1 = utils::extract_bits(opcode, 0b00110000);
+        let op1 = Operand {
+            mode: OperandType::Register,
+            register: self.register_pair_bitmask_to_enum(op1),
+            ..Default::default()
+        };
+
+        let op2 = Operand {
+            mode: OperandType::None,
+            ..Default::default()
+        };
+
+        Instruction { function: OpCode::PUSH, cycles: 3, bytes: 1, operand1: op1, operand2: op2 }
+    }
+
+    fn assemble_pop_ix_iy(&self, opcode: u8) -> Instruction {
+        let op1 = match opcode {
+            0xdd => Register::RegIX,
+            0xfd => Register::RegIY,
+            byte => panic!("unknown register to pop in pop_ix_iy {:x}", byte)
+        };
+        let op1 = Operand {
+            mode: OperandType::Register,
+            register: op1,
+            ..Default::default()
+        };
+
+        let op2 = Operand {
+            mode: OperandType::None,
+            ..Default::default()
+        };
+
+        Instruction { function: OpCode::POP, cycles: 4, bytes: 2, operand1: op1, operand2: op2 }
+    }
+
+    fn assemble_push_ix_iy(&self, opcode: u8) -> Instruction {
+        let op1 = match opcode {
+            0xdd => Register::RegIX,
+            0xfd => Register::RegIY,
+            byte => panic!("unknown register to push in push_ix_iy {:x}", byte)
+        };
+        let op1 = Operand {
+            mode: OperandType::Register,
+            register: op1,
+            ..Default::default()
+        };
+
+        let op2 = Operand {
+            mode: OperandType::None,
+            ..Default::default()
+        };
+
+        Instruction { function: OpCode::PUSH, cycles: 4, bytes: 2, operand1: op1, operand2: op2 }
     }
 
     fn assemble_ld_sp_ix_iy(&self, opcode: u8) -> Instruction {
@@ -666,6 +746,8 @@ impl<'cool> Cpu<'cool> {
             0x2a => { self.assemble_ld_ix_iy_nn_mem(opcode) },
             0x22 => { self.assemble_ld_nn_mem_ix_iy(opcode) },
             0xf9 => { self.assemble_ld_sp_ix_iy(opcode) },
+            0xe5 => { self.assemble_push_ix_iy(opcode) },
+            0xe1 => { self.assemble_pop_ix_iy(opcode) },
             op if utils::bitmask(op, 0b11_000_111) == 0b01_000_110 => { self.assemble_ld_r_ix_iy(opcode) },
             op if utils::bitmask(op, 0b11_111_000) == 0b01_110_000 => { self.assemble_ld_ix_iy_r(opcode) },
             whatsthis    => { panic!("unknown byte for dd prefix: {:x}", whatsthis); }
@@ -1118,6 +1200,26 @@ mod tests {
         assert_eq!(format!("{}", processor.next().unwrap()), "LD SP, HL");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD SP, IX");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD SP, IY");
+    }
+
+    #[test]
+    fn test_push() {
+        let bytes = vec![0xd5, 0xdd, 0xe5, 0xfd, 0xe5];
+        let mut processor: Cpu = Cpu::new(&bytes);
+        assert_eq!(format!("{}", processor.next().unwrap()), "PUSH DE");
+        assert_eq!(format!("{}", processor.next().unwrap()), "PUSH IX");
+        assert_eq!(format!("{}", processor.next().unwrap()), "PUSH IY");
+    }
+
+    #[test]
+    fn test_pop() {
+        let bytes = vec![0xc1, 0xd1, 0xe1, 0xdd, 0xe1, 0xfd, 0xe1];
+        let mut processor: Cpu = Cpu::new(&bytes);
+        assert_eq!(format!("{}", processor.next().unwrap()), "POP BC");
+        assert_eq!(format!("{}", processor.next().unwrap()), "POP DE");
+        assert_eq!(format!("{}", processor.next().unwrap()), "POP HL");
+        assert_eq!(format!("{}", processor.next().unwrap()), "POP IX");
+        assert_eq!(format!("{}", processor.next().unwrap()), "POP IY");
     }
 
     #[test]
