@@ -193,7 +193,7 @@ impl<'cool> Iterator for Cpu<'cool> {
     fn next(&mut self) -> Option<Instruction> {
         match self.fetch_instruction() {
             Ok(instr) => { self.consume_instruction(&instr); Some(instr) },
-            Err(e) => { None }
+            Err(_) => { None }
         }
     }
 }
@@ -387,26 +387,26 @@ impl<'cool> Cpu<'cool> {
             op if utils::bitmask(op, 0b11001111) == 0b11000101 => { self.assemble_push_qq(op) },
             op if utils::bitmask(op, 0b11001111) == 0b11000001 => { self.assemble_pop_qq(op) },
 
-            op if utils::bitmask(op, 0b11111000) == 0b10001000 => { self.assemble_adc_r(op) },
-            op if utils::bitmask(op, 0b11111111) == 0xce       => { self.assemble_adc_n(op) },
+            op if utils::bitmask(op, 0b11111000) == 0b10001000 => { self.assemble_arithmetic_r(op, OpCode::ADC) },
+            op if utils::bitmask(op, 0b11111111) == 0xce       => { self.assemble_arithmetic_n(op, OpCode::ADC) },
 
-            op if utils::bitmask(op, 0b11111000) == 0b10010000 => { self.assemble_sub_r(op) },
-            op if utils::bitmask(op, 0b11111111) == 0xd6       => { self.assemble_sub_n(op) },
+            op if utils::bitmask(op, 0b11111000) == 0b10010000 => { self.assemble_arithmetic_r(op, OpCode::SUB) },
+            op if utils::bitmask(op, 0b11111111) == 0xd6       => { self.assemble_arithmetic_n(op, OpCode::SUB) },
 
-            op if utils::bitmask(op, 0b11111000) == 0b10011000 => { self.assemble_sbc_r(op) },
-            op if utils::bitmask(op, 0b11111111) == 0xde       => { self.assemble_sbc_n(op) },
+            op if utils::bitmask(op, 0b11111000) == 0b10011000 => { self.assemble_arithmetic_r(op, OpCode::SBC) },
+            op if utils::bitmask(op, 0b11111111) == 0xde       => { self.assemble_arithmetic_n(op, OpCode::SBC) },
 
-            op if utils::bitmask(op, 0b11111000) == 0b10100000 => { self.assemble_and_r(op) },
-            op if utils::bitmask(op, 0b11111111) == 0xe6       => { self.assemble_and_n(op) },
+            op if utils::bitmask(op, 0b11111000) == 0b10100000 => { self.assemble_arithmetic_r(op, OpCode::AND) },
+            op if utils::bitmask(op, 0b11111111) == 0xe6       => { self.assemble_arithmetic_n(op, OpCode::AND) },
 
-            op if utils::bitmask(op, 0b11111000) == 0b10110000 => { self.assemble_or_r(op) },
-            op if utils::bitmask(op, 0b11111111) == 0xf6       => { self.assemble_or_n(op) },
+            op if utils::bitmask(op, 0b11111000) == 0b10110000 => { self.assemble_arithmetic_r(op, OpCode::OR) },
+            op if utils::bitmask(op, 0b11111111) == 0xf6       => { self.assemble_arithmetic_n(op, OpCode::OR) },
 
-            op if utils::bitmask(op, 0b11111000) == 0b10101000 => { self.assemble_xor_r(op) },
-            op if utils::bitmask(op, 0b11111111) == 0xee       => { self.assemble_xor_n(op) },
+            op if utils::bitmask(op, 0b11111000) == 0b10101000 => { self.assemble_arithmetic_r(op, OpCode::XOR) },
+            op if utils::bitmask(op, 0b11111111) == 0xee       => { self.assemble_arithmetic_n(op, OpCode::XOR) },
 
-            op if utils::bitmask(op, 0b11111000) == 0b10111000 => { self.assemble_cp_r(op) },
-            op if utils::bitmask(op, 0b11111111) == 0xfe       => { self.assemble_cp_n(op) },
+            op if utils::bitmask(op, 0b11111000) == 0b10111000 => { self.assemble_arithmetic_r(op, OpCode::CP) },
+            op if utils::bitmask(op, 0b11111111) == 0xfe       => { self.assemble_arithmetic_n(op, OpCode::CP) },
 
             opcode => { panic!("unknown {:x}", opcode); }
         };
@@ -973,7 +973,7 @@ impl<'cool> Cpu<'cool> {
         Instruction { function: OpCode::LD, operand1: dst, operand2: src, cycles: 2, bytes: 2}
     }
 
-    pub fn assemble_adc_r(&self, opcode: u8) -> Instruction {
+    pub fn assemble_arithmetic_r(&self, opcode: u8, function: OpCode) -> Instruction {
         let src = utils::extract_bits(opcode, 0b111);
         let src = Operand {
             mode: OperandType::Register,
@@ -986,12 +986,11 @@ impl<'cool> Cpu<'cool> {
             ..Default::default()
         };
 
-        Instruction { function: OpCode::ADC, operand1: src, operand2: none, cycles: 1, bytes: 1 }
+        Instruction { function: function, operand1: src, operand2: none, cycles: 1, bytes: 1 }
     }
 
-    pub fn assemble_adc_n(&self, opcode: u8) -> Instruction {
+    pub fn assemble_arithmetic_n(&self, opcode: u8, function: OpCode) -> Instruction {
         let opcodes = self.peek_bytes(2).unwrap();
-        let src = utils::extract_bits(opcode, 0b111);
         let src = Operand {
             mode: OperandType::Immediate,
             value: opcodes[1] as u16,
@@ -1003,205 +1002,7 @@ impl<'cool> Cpu<'cool> {
             ..Default::default()
         };
 
-        Instruction { function: OpCode::ADC, operand1: src, operand2: none, cycles: 2, bytes: 2 }
-    }
-
-    pub fn assemble_sub_r(&self, opcode: u8) -> Instruction {
-        let src = utils::extract_bits(opcode, 0b111);
-        let src = Operand {
-            mode: OperandType::Register,
-            register: self.register_single_bitmask_to_enum(src),
-            ..Default::default()
-        };
-
-        let none = Operand {
-            mode: OperandType::None,
-            ..Default::default()
-        };
-
-        Instruction { function: OpCode::SUB, operand1: src, operand2: none, cycles: 1, bytes: 1 }
-    }
-
-    pub fn assemble_sub_n(&self, opcode: u8) -> Instruction {
-        let opcodes = self.peek_bytes(2).unwrap();
-        let src = utils::extract_bits(opcode, 0b111);
-        let src = Operand {
-            mode: OperandType::Immediate,
-            value: opcodes[1] as u16,
-            ..Default::default()
-        };
-
-        let none = Operand {
-            mode: OperandType::None,
-            ..Default::default()
-        };
-
-        Instruction { function: OpCode::SUB, operand1: src, operand2: none, cycles: 2, bytes: 2 }
-    }
-
-    pub fn assemble_sbc_r(&self, opcode: u8) -> Instruction {
-        let src = utils::extract_bits(opcode, 0b111);
-        let src = Operand {
-            mode: OperandType::Register,
-            register: self.register_single_bitmask_to_enum(src),
-            ..Default::default()
-        };
-
-        let none = Operand {
-            mode: OperandType::None,
-            ..Default::default()
-        };
-
-        Instruction { function: OpCode::SBC, operand1: src, operand2: none, cycles: 1, bytes: 1 }
-    }
-
-    pub fn assemble_sbc_n(&self, opcode: u8) -> Instruction {
-        let opcodes = self.peek_bytes(2).unwrap();
-        let src = utils::extract_bits(opcode, 0b111);
-        let src = Operand {
-            mode: OperandType::Immediate,
-            value: opcodes[1] as u16,
-            ..Default::default()
-        };
-
-        let none = Operand {
-            mode: OperandType::None,
-            ..Default::default()
-        };
-
-        Instruction { function: OpCode::SBC, operand1: src, operand2: none, cycles: 2, bytes: 2 }
-    }
-
-    pub fn assemble_and_r(&self, opcode: u8) -> Instruction {
-        let src = utils::extract_bits(opcode, 0b111);
-        let src = Operand {
-            mode: OperandType::Register,
-            register: self.register_single_bitmask_to_enum(src),
-            ..Default::default()
-        };
-
-        let none = Operand {
-            mode: OperandType::None,
-            ..Default::default()
-        };
-
-        Instruction { function: OpCode::AND, operand1: src, operand2: none, cycles: 1, bytes: 1 }
-    }
-
-    pub fn assemble_and_n(&self, opcode: u8) -> Instruction {
-        let opcodes = self.peek_bytes(2).unwrap();
-        let src = utils::extract_bits(opcode, 0b111);
-        let src = Operand {
-            mode: OperandType::Immediate,
-            value: opcodes[1] as u16,
-            ..Default::default()
-        };
-
-        let none = Operand {
-            mode: OperandType::None,
-            ..Default::default()
-        };
-
-        Instruction { function: OpCode::AND, operand1: src, operand2: none, cycles: 2, bytes: 2 }
-    }
-
-    pub fn assemble_or_r(&self, opcode: u8) -> Instruction {
-        let src = utils::extract_bits(opcode, 0b111);
-        let src = Operand {
-            mode: OperandType::Register,
-            register: self.register_single_bitmask_to_enum(src),
-            ..Default::default()
-        };
-
-        let none = Operand {
-            mode: OperandType::None,
-            ..Default::default()
-        };
-
-        Instruction { function: OpCode::OR, operand1: src, operand2: none, cycles: 1, bytes: 1 }
-    }
-
-    pub fn assemble_or_n(&self, opcode: u8) -> Instruction {
-        let opcodes = self.peek_bytes(2).unwrap();
-        let src = utils::extract_bits(opcode, 0b111);
-        let src = Operand {
-            mode: OperandType::Immediate,
-            value: opcodes[1] as u16,
-            ..Default::default()
-        };
-
-        let none = Operand {
-            mode: OperandType::None,
-            ..Default::default()
-        };
-
-        Instruction { function: OpCode::OR, operand1: src, operand2: none, cycles: 2, bytes: 2 }
-    }
-
-    pub fn assemble_xor_r(&self, opcode: u8) -> Instruction {
-        let src = utils::extract_bits(opcode, 0b111);
-        let src = Operand {
-            mode: OperandType::Register,
-            register: self.register_single_bitmask_to_enum(src),
-            ..Default::default()
-        };
-
-        let none = Operand {
-            mode: OperandType::None,
-            ..Default::default()
-        };
-
-        Instruction { function: OpCode::XOR, operand1: src, operand2: none, cycles: 1, bytes: 1 }
-    }
-
-    pub fn assemble_xor_n(&self, opcode: u8) -> Instruction {
-        let opcodes = self.peek_bytes(2).unwrap();
-        let src = utils::extract_bits(opcode, 0b111);
-        let src = Operand {
-            mode: OperandType::Immediate,
-            value: opcodes[1] as u16,
-            ..Default::default()
-        };
-
-        let none = Operand {
-            mode: OperandType::None,
-            ..Default::default()
-        };
-
-        Instruction { function: OpCode::XOR, operand1: src, operand2: none, cycles: 2, bytes: 2 }
-    }
-
-    pub fn assemble_cp_r(&self, opcode: u8) -> Instruction {
-        let src = utils::extract_bits(opcode, 0b111);
-        let src = Operand {
-            mode: OperandType::Register,
-            register: self.register_single_bitmask_to_enum(src),
-            ..Default::default()
-        };
-
-        let none = Operand {
-            mode: OperandType::None,
-            ..Default::default()
-        };
-
-        Instruction { function: OpCode::CP, operand1: src, operand2: none, cycles: 1, bytes: 1 }
-    }
-
-    pub fn assemble_cp_n(&self, opcode: u8) -> Instruction {
-        let opcodes = self.peek_bytes(2).unwrap();
-        let src = utils::extract_bits(opcode, 0b111);
-        let src = Operand {
-            mode: OperandType::Immediate,
-            value: opcodes[1] as u16,
-            ..Default::default()
-        };
-
-        let none = Operand {
-            mode: OperandType::None,
-            ..Default::default()
-        };
-
-        Instruction { function: OpCode::CP, operand1: src, operand2: none, cycles: 2, bytes: 2 }
+        Instruction { function: function, operand1: src, operand2: none, cycles: 2, bytes: 2 }
     }
 
     pub fn assemble_ld_r_ix_iy(&self, opcode: u8) -> Instruction {
@@ -1296,10 +1097,6 @@ impl<'cool> Cpu<'cool> {
         };
 
         return Instruction { function: OpCode::ADD, operand1: dst, operand2: src, cycles: 2, bytes: 2 }
-    }
-
-    pub fn assemble_ld(&self, opcode: u8) -> Instruction {
-        panic!("unknown ld {:x}", opcode);
     }
 
     fn peek_bytes(&self, num_bytes: usize) -> Result<&[u8], CpuError> {
