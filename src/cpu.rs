@@ -1,4 +1,5 @@
 use utils;
+use mmu;
 use std::fmt;
 
 pub enum Flag {
@@ -163,9 +164,7 @@ impl fmt::Display for Instruction {
 
 }
 
-// TODO: wait a minute why am I storing the ram in the cpu? that don't make sense.
 pub struct Cpu<'cool> {
-    raw_bytes: &'cool [u8],
     reg_pc: u16,
     reg_a: u8,
     reg_b: u8,
@@ -184,7 +183,8 @@ pub struct Cpu<'cool> {
     reg_iy: u16,
     reg_sp: u16,
     cycles: u64,
-    flags: u8
+    flags: u8,
+    mmu: &'cool mut mmu::Mmu
 }
 
 impl<'cool> Iterator for Cpu<'cool> {
@@ -199,9 +199,8 @@ impl<'cool> Iterator for Cpu<'cool> {
 }
 
 impl<'cool> Cpu<'cool> {
-    pub fn new (raw_bytes: &[u8]) -> Cpu {
+    pub fn new (mmu: &mut mmu::Mmu) -> Cpu {
         Cpu {
-            raw_bytes: raw_bytes,
             reg_pc: 0,
             reg_a: 0,
             reg_b: 0,
@@ -220,7 +219,8 @@ impl<'cool> Cpu<'cool> {
             reg_iy: 0,
             reg_sp: 0,
             cycles: 0,
-            flags: 0
+            flags: 0,
+            mmu: mmu
         }
     }
 
@@ -1099,25 +1099,29 @@ impl<'cool> Cpu<'cool> {
         return Instruction { function: OpCode::ADD, operand1: dst, operand2: src, cycles: 2, bytes: 2 }
     }
 
+    // todo: replace raw_bytes with mmu
     fn peek_bytes(&self, num_bytes: usize) -> Result<&[u8], CpuError> {
-        // println!("PEEK: {:x} - {:x} < {:x}", self.raw_bytes.len() as u16, self.reg_pc, num_bytes as u16);
+        Ok(self.mmu.read_u8_many(self.reg_pc, num_bytes))
+        /*// println!("PEEK: {:x} - {:x} < {:x}", self.raw_bytes.len() as u16, self.reg_pc, num_bytes as u16);
         if self.raw_bytes.len() as u16 -self.reg_pc < num_bytes as u16 {
             return Err(CpuError::OutOfBytes);
         }
 
         let start = self.reg_pc as usize;
         let end = start + num_bytes;
-        Ok(&self.raw_bytes[start..end])
+        Ok(&self.raw_bytes[start..end])*/
     }
 }
 
 #[cfg(test)]
 mod tests {
     use cpu::Cpu;
+    use mmu::Mmu;
     #[test]
     fn test_ld_r_r() {
         let bytes = vec![0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x70];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD B, B");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD B, C");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD B, D");
@@ -1132,7 +1136,8 @@ mod tests {
     #[test]
     fn test_ld_r_n() {
         let bytes = vec![0x16, 0x32, 0x16, 0x7f];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD D, 50");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD D, 127");
     }
@@ -1140,7 +1145,8 @@ mod tests {
     #[test]
     fn test_ld_r_ix_iy() {
         let bytes = vec![0xdd, 0x46, 0xff, 0xdd, 0x46, 0x7f, 0xfd, 0x46, 0xff, 0xfd, 0x46, 0x7f];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD B, (IX-1)");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD B, (IX+127)");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD B, (IY-1)");
@@ -1150,7 +1156,8 @@ mod tests {
     #[test]
     fn test_ld_ix_iy_r() {
         let bytes = vec![0xdd, 0x77, 0x7f, 0xfd, 0x77, 0x7f, 0xdd, 0x77, 0xff, 0xfd, 0x77, 0xff];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (IX+127), A");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (IY+127), A");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (IX-1), A");
@@ -1160,7 +1167,8 @@ mod tests {
     #[test]
     fn test_ld_hl_n() {
         let bytes = vec![0x36, 0xff, 0x36, 0x7f];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (HL), 255");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (HL), 127");
     }
@@ -1168,7 +1176,8 @@ mod tests {
     #[test]
     fn test_ld_ix_iy_n() {
         let bytes = vec![0xdd, 0x36, 0xff, 0xff, 0xfd, 0x36, 0x7f, 0xff];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (IX-1), 255");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (IY+127), 255");
     }
@@ -1176,7 +1185,8 @@ mod tests {
     #[test]
     fn test_ld_a_rp() {
         let bytes = vec![0x0a, 0x1a];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD A, (BC)");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD A, (DE)");
     }
@@ -1184,7 +1194,8 @@ mod tests {
     #[test]
     fn test_ld_rp_a() {
         let bytes = vec![0x02, 0x12];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (BC), A");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (DE), A");
     }
@@ -1192,7 +1203,8 @@ mod tests {
     #[test]
     fn test_ld_a_nn() {
         let bytes = vec![0x3a, 0x41, 0x41, 0x3a, 0x0, 0x0, 0x3a, 0xff, 0xff];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD A, (16705)");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD A, (0)");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD A, (65535)");
@@ -1201,7 +1213,8 @@ mod tests {
     #[test]
     fn test_ld_nn_a() {
         let bytes = vec![0x32, 0x41, 0x41, 0x32, 0x0, 0x0, 0x32, 0xff, 0xff];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (16705), A");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (0), A");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (65535), A");
@@ -1210,7 +1223,8 @@ mod tests {
     #[test]
     fn test_handle_ed_prefix() {
         let bytes = vec![0xed, 0x57, 0xed, 0x5f, 0xed, 0x47, 0xed, 0x4f];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD A, I");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD A, R");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD I, A");
@@ -1220,7 +1234,8 @@ mod tests {
     #[test]
     fn test_assemble_ld_dd_nn() {
         let bytes = vec![0x31, 0x41, 0x41, 0x21, 0xff, 0xff];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD SP, 16705");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD HL, 65535");
     }
@@ -1228,7 +1243,8 @@ mod tests {
     #[test]
     fn test_assemble_ld_ix_iy_nn() {
         let bytes = vec![0xdd, 0x21, 0x41, 0x41, 0xdd, 0x21, 0xff, 0xff, 0xfd, 0x21, 0xff, 0xff, 0xfd, 0x21, 0x00, 0x00];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD IX, 16705");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD IX, 65535");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD IY, 65535");
@@ -1238,7 +1254,8 @@ mod tests {
     #[test]
     fn test_assemble_ld_hl_nn() {
         let bytes = vec![0x2a, 0x41, 0x41, 0x2a, 0x00, 0x00];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD HL, (16705)");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD HL, (0)");
     }
@@ -1246,7 +1263,8 @@ mod tests {
     #[test]
     fn test_handle_ed_dd_nn() {
         let bytes = vec![0xed, 0x7b, 0x00, 0x00, 0xed, 0x6b, 0x11, 0x22];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD SP, (0)");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD HL, (8721)");
     }
@@ -1254,7 +1272,8 @@ mod tests {
     #[test]
     fn test_assemble_dd_ix_nn() {
         let bytes = vec![0xdd, 0x2a, 0x00, 0x00, 0xfd, 0x2a, 0x01, 0x00];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD IX, (0)");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD IY, (1)");
     }
@@ -1262,7 +1281,8 @@ mod tests {
     #[test]
     fn test_ld_nn_mem_hl() {
         let bytes = vec![0x22, 0x01, 0x00, 0x22, 0x00, 0x00];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (1), HL");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (0), HL");
     }
@@ -1270,7 +1290,8 @@ mod tests {
     #[test]
     fn test_ld_nn_mem_dd() {
         let bytes = vec![0xed, 0x53, 0x01, 0x00, 0xed, 0x63, 0x02, 0x00];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (DE), 1");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (HL), 2");
     }
@@ -1278,7 +1299,8 @@ mod tests {
     #[test]
     fn test_ld_nn_mem_ix_iy() {
         let bytes = vec![0xdd, 0x22, 0x01, 0x00, 0xfd, 0x22, 0x02, 0x00];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (1), IX");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD (2), IY");
     }
@@ -1286,7 +1308,8 @@ mod tests {
     #[test]
     fn test_ld_sp_hl_ix_iy() {
         let bytes = vec![0xf9, 0xdd, 0xf9, 0xfd, 0xf9];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "LD SP, HL");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD SP, IX");
         assert_eq!(format!("{}", processor.next().unwrap()), "LD SP, IY");
@@ -1295,7 +1318,8 @@ mod tests {
     #[test]
     fn test_push() {
         let bytes = vec![0xd5, 0xdd, 0xe5, 0xfd, 0xe5];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "PUSH DE");
         assert_eq!(format!("{}", processor.next().unwrap()), "PUSH IX");
         assert_eq!(format!("{}", processor.next().unwrap()), "PUSH IY");
@@ -1304,7 +1328,8 @@ mod tests {
     #[test]
     fn test_pop() {
         let bytes = vec![0xc1, 0xd1, 0xe1, 0xdd, 0xe1, 0xfd, 0xe1];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "POP BC");
         assert_eq!(format!("{}", processor.next().unwrap()), "POP DE");
         assert_eq!(format!("{}", processor.next().unwrap()), "POP HL");
@@ -1315,7 +1340,8 @@ mod tests {
     #[test]
     fn test_add_a_r() {
         let bytes = vec![0x80, 0x87];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, B");
         assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, A");
     }
@@ -1323,14 +1349,16 @@ mod tests {
     #[test]
     fn test_add_a_n() {
         let bytes = vec![0xc6, 0x41];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, 65");
     }
 
     #[test]
     fn test_add_a_hl_mem() {
         let bytes = vec![0x86, 0xdd, 0x86, 0x41, 0xfd, 0x86, 0x42];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, (HL)");
         assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, (IX+65)");
         assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, (IY+66)");
@@ -1339,7 +1367,8 @@ mod tests {
     #[test]
     fn test_arithmetic_r() {
        let bytes = vec![0x8f, 0x97, 0x9f, 0xa7, 0xb7, 0xaf, 0xbf];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "ADC A");
         assert_eq!(format!("{}", processor.next().unwrap()), "SUB A");
         assert_eq!(format!("{}", processor.next().unwrap()), "SBC A");
@@ -1352,7 +1381,8 @@ mod tests {
     #[test]
     fn test_arithmetic_n() {
        let bytes = vec![0xce, 0x41, 0xd6, 0x41, 0xde, 0x41, 0xe6, 0x41, 0xf6, 0x41, 0xee, 0x41, 0xfe, 0x41];
-        let mut processor: Cpu = Cpu::new(&bytes);
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
         assert_eq!(format!("{}", processor.next().unwrap()), "ADC 65");
         assert_eq!(format!("{}", processor.next().unwrap()), "SUB 65");
         assert_eq!(format!("{}", processor.next().unwrap()), "SBC 65");

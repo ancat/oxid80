@@ -5,6 +5,7 @@ use std::process::exit;
 use std::env;
 
 mod cpu;
+mod mmu;
 mod utils;
 
 fn main() -> () {
@@ -30,7 +31,8 @@ fn main() -> () {
         Ok(_) => {}
     }
 
-    let mut processor: cpu::Cpu = cpu::Cpu::new(&bytes);
+    let mut memory: mmu::Mmu = mmu::Mmu::new_with_init(65536, &bytes);
+    let mut processor: cpu::Cpu = cpu::Cpu::new(&mut memory);
 
     processor.print_regs();
     loop {
