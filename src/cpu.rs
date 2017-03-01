@@ -108,7 +108,7 @@ impl Default for Operand {
 }
 
 #[derive(Debug, PartialEq)]
-enum CpuError {
+pub enum CpuError {
     OutOfBytes
 }
 
@@ -236,7 +236,7 @@ impl<'cool> Cpu<'cool> {
             Register::RegL => { self.reg_l = value },
             Register::RegI => { self.reg_i = value },
             Register::RegR => { self.reg_r = value },
-            _ => { /* handle 16 bit */ }
+            _ => { panic!("writing to 16 via 8") }
         }
     }
 
@@ -252,7 +252,33 @@ impl<'cool> Cpu<'cool> {
             Register::RegL => self.reg_l,
             Register::RegI => self.reg_i,
             Register::RegR => self.reg_r,
-            _ => { /*handle 16 bit*/ 0 }
+            _ => { panic!("reading 16 via 8"); }
+        }
+    }
+
+    fn set_16bit_register_val(&mut self, register: &Register, value: u16) -> () {
+        match *register {
+            Register::RegHL => { self.reg_hl = value },
+            Register::RegDE => { self.reg_de = value },
+            Register::RegBC => { self.reg_bc = value },
+            Register::RegIX => { self.reg_ix = value },
+            Register::RegIY => { self.reg_iy = value },
+            Register::RegPC => { self.reg_pc = value },
+            Register::RegSP => { self.reg_sp = value },
+            _ => { panic!("writing 8 via 16"); }
+        }
+    }
+
+    fn get_16bit_register_val(&self, register: &Register) -> u16 {
+        match *register {
+            Register::RegHL => self.reg_hl,
+            Register::RegDE => self.reg_de,
+            Register::RegBC => self.reg_bc,
+            Register::RegIX => self.reg_ix,
+            Register::RegIY => self.reg_iy,
+            Register::RegPC => self.reg_pc,
+            Register::RegSP => self.reg_sp,
+            _ => { panic!("reading 8 via 16"); }
         }
     }
 
@@ -264,24 +290,85 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
+    pub fn determine_operand_size_from_register(&self, register: &Register) -> usize {
+        match *register {
+            Register::RegA => 8,
+            Register::RegB => 8,
+            Register::RegC => 8,
+            Register::RegD => 8,
+            Register::RegE => 8,
+            Register::RegF => 8,
+            Register::RegH => 8,
+            Register::RegL => 8,
+            Register::RegI => 8,
+            Register::RegR => 8,
+            Register::RegBC => 16,
+            Register::RegDE => 16,
+            Register::RegHL => 16,
+            Register::RegIX => 16,
+            Register::RegIY => 16,
+            Register::RegSP => 16,
+            Register::RegPC => 16,
+            Register::None => panic!("attempting to get operand size of a none type register")
+        }
+    }
+
+    pub fn determine_address_from_operand(&self, operand: &Operand) -> u16 {
+        if operand.mode != OperandType::Memory {
+            panic!("treating non-memory operand as a memory address")
+        }
+
+        let mut address: i16;
+        if operand.register != Register::None {
+            address = match self.determine_operand_size_from_register(&operand.register) {
+                16 => self.get_16bit_register_val(&operand.register),
+                _  => panic!("not supposed to happen ever ever")
+            } as i16;
+
+            address += operand.displacement;
+        } else {
+            address = operand.value as i16;
+        }
+
+        address as u16
+    }
+
+    // ADD A, r
+    // ADD A, n
+    // ADD A, (HL)
+    // ADD A, (IX+d)
+    // ADD A, (IY+d)
+    //
+    // ADD HL, BC/DE/HL/SP
     pub fn execute_add(&mut self, instruction: &Instruction) -> () {
         let operand1 = &instruction.operand1;
         let operand2 = &instruction.operand2;
 
         let src = match operand2.mode {
-            OperandType::Immediate => operand2.value as u8,
-            OperandType::Register => self.get_8bit_register_val(&operand2.register),
-            OperandType::Memory => 42,
+            OperandType::Immediate => operand2.value,
+            OperandType::Register => self.get_8bit_register_val(&operand2.register) as u16,
+            OperandType::Memory => self.determine_address_from_operand(operand2),
             _ => panic!("unsupported")
         };
 
         if operand1.mode == OperandType::Register {
-            let prev_value = self.get_8bit_register_val(&operand1.register);
-            self.set_8bit_register_val(&operand1.register, prev_value.wrapping_add(src));
-
+            match self.determine_operand_size_from_register(&operand1.register) {
+                8  => {
+                    let prev_value = self.get_8bit_register_val(&operand1.register);
+                    // the u8 cast is okay because this only happens if src was a u8 before (cast into u16)
+                    self.set_8bit_register_val(&operand1.register, prev_value.wrapping_add(src as u8));
+                },
+                16 => {
+                    let prev_value = self.get_16bit_register_val(&operand1.register);
+                    self.set_16bit_register_val(&operand1.register, prev_value.wrapping_add(src));
+                },
+                _ => panic!("nah")
+            }
         }
     }
 
+    // some instruction encodings are impossible to determine what size memory read/write they do
+    // TODO: add explicit memory size in the operand
     pub fn execute_ld(&mut self, instruction: &Instruction) -> () {
         let operand1 = &instruction.operand1;
         let operand2 = &instruction.operand2;
@@ -292,8 +379,11 @@ impl<'cool> Cpu<'cool> {
             src = self.get_8bit_register_val(op2reg);
         } else if operand2.mode == OperandType::Immediate {
             src = operand2.value as u8;
+        } else if operand2.mode == OperandType::Memory {
+            let address = self.determine_address_from_operand(&operand2);
+            src = self.read_u8(address);
         } else {
-            src = 421;
+            panic!("how ???");
         }
 
         if operand1.mode == OperandType::Register {
@@ -1110,6 +1200,10 @@ impl<'cool> Cpu<'cool> {
         let start = self.reg_pc as usize;
         let end = start + num_bytes;
         Ok(&self.raw_bytes[start..end])*/
+    }
+
+    fn read_u8(&self, address: u16) -> u8 {
+        self.mmu.read_u8(address)
     }
 }
 

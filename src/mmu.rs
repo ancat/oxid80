@@ -1,6 +1,3 @@
-use utils;
-use std::fmt;
-
 pub struct Mmu {
     raw_bytes: Vec<u8>,
 }
