@@ -299,25 +299,25 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
-    pub fn determine_operand_size_from_register(&self, register: &Register) -> usize {
+    pub fn determine_operand_size_from_register(&self, register: &Register) -> OperandSize {
         match *register {
-            Register::RegA => 8,
-            Register::RegB => 8,
-            Register::RegC => 8,
-            Register::RegD => 8,
-            Register::RegE => 8,
-            Register::RegF => 8,
-            Register::RegH => 8,
-            Register::RegL => 8,
-            Register::RegI => 8,
-            Register::RegR => 8,
-            Register::RegBC => 16,
-            Register::RegDE => 16,
-            Register::RegHL => 16,
-            Register::RegIX => 16,
-            Register::RegIY => 16,
-            Register::RegSP => 16,
-            Register::RegPC => 16,
+            Register::RegA => OperandSize::Byte,
+            Register::RegB => OperandSize::Byte,
+            Register::RegC => OperandSize::Byte,
+            Register::RegD => OperandSize::Byte,
+            Register::RegE => OperandSize::Byte,
+            Register::RegF => OperandSize::Byte,
+            Register::RegH => OperandSize::Byte,
+            Register::RegL => OperandSize::Byte,
+            Register::RegI => OperandSize::Byte,
+            Register::RegR => OperandSize::Byte,
+            Register::RegBC => OperandSize::TwoBytes,
+            Register::RegDE => OperandSize::TwoBytes,
+            Register::RegHL => OperandSize::TwoBytes,
+            Register::RegIX => OperandSize::TwoBytes,
+            Register::RegIY => OperandSize::TwoBytes,
+            Register::RegSP => OperandSize::TwoBytes,
+            Register::RegPC => OperandSize::TwoBytes,
             Register::None => panic!("attempting to get operand size of a none type register")
         }
     }
@@ -330,7 +330,7 @@ impl<'cool> Cpu<'cool> {
         let mut address: i16;
         if operand.register != Register::None {
             address = match self.determine_operand_size_from_register(&operand.register) {
-                16 => self.get_16bit_register_val(&operand.register),
+                OperandSize::TwoBytes => self.get_16bit_register_val(&operand.register),
                 _  => panic!("not supposed to happen ever ever")
             } as i16;
 
@@ -362,16 +362,16 @@ impl<'cool> Cpu<'cool> {
 
         if operand1.mode == OperandType::Register {
             match self.determine_operand_size_from_register(&operand1.register) {
-                8  => {
+                OperandSize::Byte  => {
                     let prev_value = self.get_8bit_register_val(&operand1.register);
                     // the u8 cast is okay because this only happens if src was a u8 before (cast into u16)
                     self.set_8bit_register_val(&operand1.register, prev_value.wrapping_add(src as u8));
                 },
-                16 => {
+                OperandSize::TwoBytes => {
                     let prev_value = self.get_16bit_register_val(&operand1.register);
                     self.set_16bit_register_val(&operand1.register, prev_value.wrapping_add(src));
-                },
-                _ => panic!("nah")
+                }
+                _ => { panic!("this will never happen because registers are not zero bytes ever") }
             }
         }
     }
@@ -407,8 +407,8 @@ impl<'cool> Cpu<'cool> {
 
     pub fn consume_instruction<'wat> (&mut self, instruction: &'wat Instruction) -> &'wat Instruction {
         match instruction.function {
-            OpCode::LD   => self.execute_ld(instruction),
-            OpCode::ADD  => self.execute_add(instruction),
+            OpCode::LD   => self.execute_nop(instruction),
+            OpCode::ADD  => self.execute_nop(instruction),
             OpCode::PUSH => self.execute_nop(instruction),
             OpCode::POP  => self.execute_nop(instruction),
             OpCode::ADC  => self.execute_nop(instruction),
@@ -421,14 +421,37 @@ impl<'cool> Cpu<'cool> {
             _            => { panic!("can't execute dis {:?}", instruction.function); }
         };
 
-        let prev_value = match instruction.operand1.mode {
-            OperandType::Register => self.get_8bit_register_val(&instruction.operand1.register),
-            _ => { 1 }
+        let sign_bit: u8 = match instruction.operand1.mode {
+            OperandType::Register => {
+                let result = match self.determine_operand_size_from_register(&instruction.operand1.register) {
+                    OperandSize::Byte => { self.get_8bit_register_val(&instruction.operand1.register) >> 7 }
+                    OperandSize::TwoBytes => { (self.get_16bit_register_val(&instruction.operand1.register) >> 15) as u8 }
+                _ => { panic!("this will never happen because registers are not zero bytes ever") }
+                };
+
+                // why can't I just cast the match?
+                result as u8
+            },
+            _ => { 0 }
+        };
+
+        let prev_zero: bool = match instruction.operand1.mode {
+            OperandType::Register => {
+                let result = match self.determine_operand_size_from_register(&instruction.operand1.register) {
+                    OperandSize::Byte => { self.get_8bit_register_val(&instruction.operand1.register) == 0 }
+                    OperandSize::TwoBytes => { self.get_16bit_register_val(&instruction.operand1.register) == 0 }
+                _ => { panic!("this will never happen because registers are not zero bytes ever") }
+                };
+
+                // why can't I just cast the match?
+                result as bool
+            },
+            _ => { false }
         };
 
         // TODO: everything else
-        self.set_flag(Flag::FlagS, prev_value & 0b10000000 == 0b10000000);
-        self.set_flag(Flag::FlagZ, prev_value == 0);
+        self.set_flag(Flag::FlagS, sign_bit == 1);
+        self.set_flag(Flag::FlagZ, prev_zero);
         self.reg_pc += instruction.bytes as u16;
         self.cycles += instruction.cycles as u64;
         instruction
