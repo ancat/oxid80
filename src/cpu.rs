@@ -80,7 +80,7 @@ pub enum OpCode {
     POP
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum OperandSize {
     Zero,
     Byte,
@@ -299,6 +299,31 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
+    pub fn determine_instruction_size(&self, instruction: &Instruction) -> OperandSize {
+        let size: OperandSize;
+
+        size = match instruction.operand1.mode {
+            OperandType::Immediate => instruction.operand1.size,
+            OperandType::Memory    => instruction.operand1.size,
+            OperandType::Register  => self.determine_operand_size_from_register(&instruction.operand1.register),
+            OperandType::None      => OperandSize::Zero
+        };
+
+        if size != OperandSize::Zero {
+            // why do I have to use return here?
+            return size;
+        }
+
+        let size = match instruction.operand2.mode {
+            OperandType::Immediate => instruction.operand2.size,
+            OperandType::Memory    => instruction.operand2.size,
+            OperandType::Register  => self.determine_operand_size_from_register(&instruction.operand2.register),
+            OperandType::None      => OperandSize::Zero
+        };
+
+        size
+    }
+
     pub fn determine_operand_size_from_register(&self, register: &Register) -> OperandSize {
         match *register {
             Register::RegA => OperandSize::Byte,
@@ -377,28 +402,47 @@ impl<'cool> Cpu<'cool> {
     }
 
     // some instruction encodings are impossible to determine what size memory read/write they do
-    // TODO: add explicit memory size in the operand
     pub fn execute_ld(&mut self, instruction: &Instruction) -> () {
         let operand1 = &instruction.operand1;
         let operand2 = &instruction.operand2;
-        let src;
+        let instruction_size = self.determine_instruction_size(instruction);
+        match instruction_size {
+            OperandSize::Zero => panic!("what's a zero bit load?"),
+            OperandSize::Byte => {
+                let src: u8 = match operand2.mode {
+                    OperandType::Register  => self.get_8bit_register_val(&operand2.register),
+                    OperandType::Immediate => operand2.value as u8,
+                    OperandType::Memory    => self.read_u8(self.determine_address_from_operand(&operand2)),
+                    OperandType::None      => panic!("none-type src in ld")
+                };
 
-        if operand2.mode == OperandType::Register {
-            let op2reg = &operand2.register;
-            src = self.get_8bit_register_val(op2reg);
-        } else if operand2.mode == OperandType::Immediate {
-            src = operand2.value as u8;
-        } else if operand2.mode == OperandType::Memory {
-            let address = self.determine_address_from_operand(&operand2);
-            src = self.read_u8(address);
-        } else {
-            panic!("how ???");
-        }
+                match operand1.mode {
+                    OperandType::Register => self.set_8bit_register_val(&operand1.register, src),
+                    OperandType::Memory   => {
+                        let addr: u16 = self.determine_address_from_operand(&operand1);
+                        self.write_u8(addr, src);
+                    },
+                    _                     => panic!("trying to write to immediate/none in ld")
+                }
+            },
+            OperandSize::TwoBytes => {
+                let src: u16 = match operand2.mode {
+                    OperandType::Register  => self.get_16bit_register_val(&operand2.register),
+                    OperandType::Immediate => operand2.value,
+                    OperandType::Memory    => self.read_u16(self.determine_address_from_operand(&operand2)),
+                    OperandType::None      => panic!("none-type src in ld")
+                };
 
-        if operand1.mode == OperandType::Register {
-            let op1reg = &operand1.register;
-            self.set_8bit_register_val(op1reg, src);
-        }
+                match operand1.mode {
+                    OperandType::Register => self.set_16bit_register_val(&operand1.register, src),
+                    OperandType::Memory   => {
+                        let addr: u16 = self.determine_address_from_operand(&operand1);
+                        self.write_u16(addr, src)
+                    },
+                    _                     => panic!("trying to write to immediate/none in ld")
+                }
+            }
+        };
     }
 
     pub fn execute_nop(&mut self, instruction: &Instruction) -> () {
@@ -407,8 +451,8 @@ impl<'cool> Cpu<'cool> {
 
     pub fn consume_instruction<'wat> (&mut self, instruction: &'wat Instruction) -> &'wat Instruction {
         match instruction.function {
-            OpCode::LD   => self.execute_nop(instruction),
-            OpCode::ADD  => self.execute_nop(instruction),
+            OpCode::LD   => self.execute_ld(instruction),
+            OpCode::ADD  => self.execute_add(instruction),
             OpCode::PUSH => self.execute_nop(instruction),
             OpCode::POP  => self.execute_nop(instruction),
             OpCode::ADC  => self.execute_nop(instruction),
@@ -1262,8 +1306,20 @@ impl<'cool> Cpu<'cool> {
         Ok(&self.raw_bytes[start..end])*/
     }
 
+    fn read_u16(&self, address: u16) -> u16 {
+        self.mmu.read_u16(address)
+    }
+
+    fn write_u16(&mut self, address: u16, value: u16) -> () {
+        self.mmu.write_u16(address, value)
+    }
+
     fn read_u8(&self, address: u16) -> u8 {
         self.mmu.read_u8(address)
+    }
+
+    fn write_u8(&mut self, address: u16, value: u8) -> () {
+        self.mmu.write_u8(address, value)
     }
 }
 
