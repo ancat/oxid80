@@ -99,7 +99,7 @@ enum OperandType {
 pub struct Operand {
     mode: OperandType,
     value: u16,
-    displacement: i16,
+    displacement: i8,
     register: Register,
     size: OperandSize
 }
@@ -359,7 +359,7 @@ impl<'cool> Cpu<'cool> {
                 _  => panic!("not supposed to happen ever ever")
             } as i16;
 
-            address += operand.displacement;
+            address += (operand.displacement as i16);
         } else {
             address = operand.value as i16;
         }
@@ -968,7 +968,7 @@ impl<'cool> Cpu<'cool> {
 
     fn assemble_add_a_ix_iy_d(&self, opcode: u8) -> Instruction {
         let opcodes = self.peek_bytes(3).expect("ADD A, (IX/IY+d) requires 3 bytes!");
-        let displacement = opcodes[2];
+        let displacement = opcodes[2] as i8;
 
         let src = match opcode {
             0b11011101 => { Register::RegIX },
@@ -979,7 +979,7 @@ impl<'cool> Cpu<'cool> {
             mode: OperandType::Memory,
             size: OperandSize::Byte,
             register: src,
-            displacement: utils::u8_to_i16(displacement),
+            displacement: displacement,
             ..Default::default()
         };
 
@@ -1073,7 +1073,7 @@ impl<'cool> Cpu<'cool> {
     pub fn assemble_ld_ix_iy_n(&self, opcode: u8) -> Instruction {
         let opcodes = self.peek_bytes(4).expect("LD (IX/IY+d), n expects 4 bytes");
         let prefix = opcodes[0];
-        let displacement = opcodes[2];
+        let displacement = opcodes[2] as i8;
         let immediate = opcodes[3];
 
         let src = Operand {
@@ -1092,7 +1092,7 @@ impl<'cool> Cpu<'cool> {
             mode: OperandType::Memory,
             size: OperandSize::Byte,
             register: dst,
-            displacement: utils::u8_to_i16(displacement),
+            displacement: displacement,
             ..Default::default()
         };
 
@@ -1108,7 +1108,6 @@ impl<'cool> Cpu<'cool> {
             mode: if dst == 0b110 { OperandType::Memory } else { OperandType::Register },
             size: if dst == 0b110 { OperandSize::Byte   } else { OperandSize::Zero     },
             register: self.register_single_bitmask_to_enum(dst),
-            displacement: 0,
             ..Default::default()
         };
 
@@ -1117,7 +1116,6 @@ impl<'cool> Cpu<'cool> {
             mode: if src == 0b110 { OperandType::Memory } else { OperandType::Register } ,
             size: if src == 0b110 { OperandSize::Byte   } else { OperandSize::Zero     },
             register: self.register_single_bitmask_to_enum(src),
-            displacement: 0,
             ..Default::default()
         };
 
@@ -1153,7 +1151,6 @@ impl<'cool> Cpu<'cool> {
             mode: OperandType::Immediate,
             size: OperandSize::Byte,
             value: src as u16,
-            displacement: 0,
             ..Default::default()
         };
 
@@ -1197,12 +1194,11 @@ impl<'cool> Cpu<'cool> {
         // LD r, (IX+d)
         // LD r, (IY+d)
         let opcodes = self.peek_bytes(3).unwrap(); // this instruction is 3 bytes
-        let displacement = opcodes[2];
+        let displacement = opcodes[2] as i8;
         let dst = utils::extract_bits(opcodes[1], 0b00111000);
         let dst = Operand {
             mode: OperandType::Register,
             register: self.register_single_bitmask_to_enum(dst),
-            displacement: 0,
             ..Default::default()
         };
 
@@ -1216,7 +1212,7 @@ impl<'cool> Cpu<'cool> {
             mode: OperandType::Memory,
             size: OperandSize::Byte,
             register: src,
-            displacement: utils::u8_to_i16(displacement),
+            displacement: displacement,
             ..Default::default()
         };
 
@@ -1227,12 +1223,11 @@ impl<'cool> Cpu<'cool> {
         // LD (IX+d), r
         // LD (IY+d), r
         let opcodes = self.peek_bytes(3).unwrap(); // this instruction is 3 bytes
-        let displacement = opcodes[2];
+        let displacement = opcodes[2] as i8;
         let src = utils::extract_bits(opcodes[1], 0b00000111);
         let src = Operand {
             mode: OperandType::Register,
             register: self.register_single_bitmask_to_enum(src),
-            displacement: 0,
             ..Default::default()
         };
 
@@ -1246,7 +1241,7 @@ impl<'cool> Cpu<'cool> {
             mode: OperandType::Memory,
             size: OperandSize::Byte,
             register: dst,
-            displacement: utils::u8_to_i16(displacement),
+            displacement: displacement,
             ..Default::default()
         };
 
