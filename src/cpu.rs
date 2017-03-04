@@ -81,6 +81,13 @@ pub enum OpCode {
 }
 
 #[derive(Debug, PartialEq)]
+pub enum OperandSize {
+    Zero,
+    Byte,
+    TwoBytes
+}
+
+#[derive(Debug, PartialEq)]
 enum OperandType {
     Register,
     Memory,
@@ -94,6 +101,7 @@ pub struct Operand {
     value: u16,
     displacement: i16,
     register: Register,
+    size: OperandSize
 }
 
 impl Default for Operand {
@@ -102,7 +110,8 @@ impl Default for Operand {
             mode: OperandType::None,
             value: 0,
             displacement: 0,
-            register: Register::None
+            register: Register::None,
+            size: OperandSize::Zero
         }
     }
 }
@@ -643,6 +652,7 @@ impl<'cool> Cpu<'cool> {
         let dst: u16 = ((opcodes[2] as u16) << 8) | (opcodes[1] as u16);
         let dst = Operand {
             mode: OperandType::Memory,
+            size: OperandSize::TwoBytes,
             value: dst,
             ..Default::default()
         };
@@ -660,11 +670,12 @@ impl<'cool> Cpu<'cool> {
         let src = match opcode {
             0x0a => { Register::RegBC },
             0x1a => { Register::RegDE },
-            _ => { panic!("unknown byte for ld_a_rp instruction"); }
+            _ => { panic!("unknown byte for LD A, (dd) instruction"); }
         };
 
         let src = Operand {
             mode: OperandType::Memory,
+            size: OperandSize::Byte,
             register: src,
             ..Default::default()
         };
@@ -682,11 +693,12 @@ impl<'cool> Cpu<'cool> {
         let dst = match opcode {
             0x02 => { Register::RegBC },
             0x12 => { Register::RegDE },
-            _ => { panic!("unknown byte for ld_rp_a instruction"); }
+            _ => { panic!("unknown byte for LD (dd), A instruction"); }
         };
 
         let dst = Operand {
             mode: OperandType::Memory,
+            size: OperandSize::Byte,
             register: dst,
             ..Default::default()
         };
@@ -705,6 +717,7 @@ impl<'cool> Cpu<'cool> {
         let dst: u16 = ((opcodes[2] as u16) << 8) | (opcodes[1] as u16);
         let dst = Operand {
             mode: OperandType::Memory,
+            size: OperandSize::Byte,
             value: dst,
             ..Default::default()
         };
@@ -729,6 +742,7 @@ impl<'cool> Cpu<'cool> {
         let src: u16 = ((opcodes[2] as u16) << 8) | (opcodes[1] as u16);
         let src = Operand {
             mode: OperandType::Memory,
+            size: OperandSize::TwoBytes,
             value: src,
             ..Default::default()
         };
@@ -749,6 +763,7 @@ impl<'cool> Cpu<'cool> {
         let src: u16 = ((opcodes[2] as u16) << 8) | (opcodes[1] as u16);
         let src = Operand {
             mode: OperandType::Immediate,
+            size: OperandSize::TwoBytes,
             value: src,
             ..Default::default()
         };
@@ -761,6 +776,7 @@ impl<'cool> Cpu<'cool> {
         let src: u16 = ((opcodes[2] as u16) << 8) | (opcodes[1] as u16);
         let src = Operand {
             mode: OperandType::Memory,
+            size: OperandSize::Byte,
             value: src,
             ..Default::default()
         };
@@ -788,6 +804,7 @@ impl<'cool> Cpu<'cool> {
         let dst = utils::extract_bits(opcodes[1], 0b00110000);
         let dst = Operand {
             mode: OperandType::Memory,
+            size: OperandSize::TwoBytes,
             register: self.register_pair_bitmask_to_enum(dst),
             ..Default::default()
         };
@@ -795,6 +812,7 @@ impl<'cool> Cpu<'cool> {
         let src: u16 = ((opcodes[3] as u16) << 8) | (opcodes[2] as u16);
         let src = Operand {
             mode: OperandType::Immediate,
+            size: OperandSize::TwoBytes,
             value: src,
             ..Default::default()
         };
@@ -815,6 +833,7 @@ impl<'cool> Cpu<'cool> {
         let src: u16 = ((opcodes[3] as u16) << 8) | (opcodes[2] as u16);
         let src = Operand {
             mode: OperandType::Memory,
+            size: OperandSize::TwoBytes,
             value: src,
             ..Default::default()
         };
@@ -891,6 +910,7 @@ impl<'cool> Cpu<'cool> {
         };
         let src = Operand {
             mode: OperandType::Memory,
+            size: OperandSize::Byte,
             register: src,
             displacement: utils::u8_to_i16(displacement),
             ..Default::default()
@@ -910,6 +930,7 @@ impl<'cool> Cpu<'cool> {
         let dst: u16 = ((opcodes[3] as u16) << 8) | (opcodes[2] as u16);
         let dst = Operand {
             mode: OperandType::Memory,
+            size: OperandSize::TwoBytes,
             value: dst,
             ..Default::default()
         };
@@ -929,7 +950,7 @@ impl<'cool> Cpu<'cool> {
     }
 
     pub fn assemble_ld_ix_iy_nn_mem(&self, opcode: u8) -> Instruction {
-        let opcodes = self.peek_bytes(4).expect("expects 4 bytes");
+        let opcodes = self.peek_bytes(4).expect("LD IX/IY, (nn) expects 4 bytes");
 
         let dst = match opcodes[0] {
             0xdd => Register::RegIX,
@@ -944,6 +965,7 @@ impl<'cool> Cpu<'cool> {
 
         let src = Operand {
             mode: OperandType::Memory,
+            size: OperandSize::TwoBytes,
             value: ((opcodes[3] as u16) << 8) | (opcodes[2] as u16),
             ..Default::default()
         };
@@ -952,7 +974,7 @@ impl<'cool> Cpu<'cool> {
     }
 
     pub fn assemble_ld_ix_iy_nn(&self, opcode: u8) -> Instruction {
-        let opcodes = self.peek_bytes(4).expect("expects 4 bytes");
+        let opcodes = self.peek_bytes(4).expect("LD IX/IY, nn expects 4 bytes");
 
         let dst = match opcodes[0] {
             0xdd => Register::RegIX,
@@ -967,6 +989,7 @@ impl<'cool> Cpu<'cool> {
 
         let src = Operand {
             mode: OperandType::Immediate,
+            size: OperandSize::TwoBytes,
             value: ((opcodes[3] as u16) << 8) | (opcodes[2] as u16),
             ..Default::default()
         };
@@ -981,13 +1004,14 @@ impl<'cool> Cpu<'cool> {
     }
 
     pub fn assemble_ld_ix_iy_n(&self, opcode: u8) -> Instruction {
-        let opcodes = self.peek_bytes(4).expect("expects 4 bytes");
+        let opcodes = self.peek_bytes(4).expect("LD (IX/IY+d), n expects 4 bytes");
         let prefix = opcodes[0];
         let displacement = opcodes[2];
         let immediate = opcodes[3];
 
         let src = Operand {
             mode: OperandType::Immediate,
+            size: OperandSize::Byte,
             value: immediate as u16,
             ..Default::default()
         };
@@ -999,6 +1023,7 @@ impl<'cool> Cpu<'cool> {
         };
         let dst = Operand {
             mode: OperandType::Memory,
+            size: OperandSize::Byte,
             register: dst,
             displacement: utils::u8_to_i16(displacement),
             ..Default::default()
@@ -1013,7 +1038,8 @@ impl<'cool> Cpu<'cool> {
         // LD (HL), r
         let dst = utils::extract_bits(opcode, 0b00111000);
         let dst = Operand {
-            mode: if dst == 0b110 { OperandType::Memory } else { OperandType::Register } ,
+            mode: if dst == 0b110 { OperandType::Memory } else { OperandType::Register },
+            size: if dst == 0b110 { OperandSize::Byte   } else { OperandSize::Zero     },
             register: self.register_single_bitmask_to_enum(dst),
             displacement: 0,
             ..Default::default()
@@ -1022,6 +1048,7 @@ impl<'cool> Cpu<'cool> {
         let src = utils::extract_bits(opcode, 0b00000111);
         let src = Operand {
             mode: if src == 0b110 { OperandType::Memory } else { OperandType::Register } ,
+            size: if src == 0b110 { OperandSize::Byte   } else { OperandSize::Zero     },
             register: self.register_single_bitmask_to_enum(src),
             displacement: 0,
             ..Default::default()
@@ -1044,10 +1071,12 @@ impl<'cool> Cpu<'cool> {
 
     pub fn assemble_ld_r_n(&self, opcode: u8) -> Instruction {
         // LD r, n
+        // LD (HL), n
         let opcodes = self.peek_bytes(2).unwrap(); // this instruction is 2 bytes
         let dst = utils::extract_bits(opcodes[0], 0b00111000);
         let dst = Operand {
             mode: if dst == 0b110 { OperandType::Memory } else { OperandType::Register },
+            size: if dst == 0b110 { OperandSize::Byte   } else { OperandSize::Zero     },
             register: self.register_single_bitmask_to_enum(dst),
             ..Default::default()
         };
@@ -1055,6 +1084,7 @@ impl<'cool> Cpu<'cool> {
         let src = opcodes[1];
         let src = Operand {
             mode: OperandType::Immediate,
+            size: OperandSize::Byte,
             value: src as u16,
             displacement: 0,
             ..Default::default()
@@ -1083,6 +1113,7 @@ impl<'cool> Cpu<'cool> {
         let opcodes = self.peek_bytes(2).unwrap();
         let src = Operand {
             mode: OperandType::Immediate,
+            size: OperandSize::Byte,
             value: opcodes[1] as u16,
             ..Default::default()
         };
@@ -1116,6 +1147,7 @@ impl<'cool> Cpu<'cool> {
         };
         let src = Operand {
             mode: OperandType::Memory,
+            size: OperandSize::Byte,
             register: src,
             displacement: utils::u8_to_i16(displacement),
             ..Default::default()
@@ -1145,6 +1177,7 @@ impl<'cool> Cpu<'cool> {
         };
         let dst = Operand {
             mode: OperandType::Memory,
+            size: OperandSize::Byte,
             register: dst,
             displacement: utils::u8_to_i16(displacement),
             ..Default::default()
@@ -1154,10 +1187,13 @@ impl<'cool> Cpu<'cool> {
     }
 
     pub fn assemble_add_a_r(&self, opcode: u8) -> Instruction {
+        // ADD A, r
+        // ADD A, (HL)
         // if the register is 110, we use (HL) instead of HL
         let src = opcode & 0b111;
         let src = Operand {
-            mode: if src == 0b110 { OperandType::Memory } else {  OperandType::Register },
+            mode: if src == 0b110 { OperandType::Memory } else { OperandType::Register },
+            size: if src == 0b110 { OperandSize::Byte   } else { OperandSize::Zero     },
             register: self.register_single_bitmask_to_enum(src),
             ..Default::default()
         };
@@ -1176,6 +1212,7 @@ impl<'cool> Cpu<'cool> {
         let src = opcodes[1] as u16;
         let src = Operand {
             mode: OperandType::Immediate,
+            size: OperandSize::Byte,
             value: src,
             ..Default::default()
         };
