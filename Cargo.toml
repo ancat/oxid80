@@ -1,0 +1,6 @@
+[package]
+name = "oxid80"
+version = "0.1.0"
+authors = ["George W. Bush"]
+
+[dependencies]
