@@ -377,26 +377,56 @@ impl<'cool> Cpu<'cool> {
     pub fn execute_add(&mut self, instruction: &Instruction) -> () {
         let operand1 = &instruction.operand1;
         let operand2 = &instruction.operand2;
+        let instruction_size = self.determine_instruction_size(instruction);
+        match instruction_size {
+            OperandSize::Zero => panic!("what's a zero bit add"),
+            OperandSize::Byte => {
+                let src: u8 = match operand2.mode {
+                    OperandType::Immediate => operand2.value as u8,
+                    OperandType::Register => self.get_8bit_register_val(&operand2.register),
+                    OperandType::Memory => self.read_u8(self.determine_address_from_operand(operand2)),
+                    _ => panic!("unsupported")
+                };
 
-        let src = match operand2.mode {
-            OperandType::Immediate => operand2.value,
-            OperandType::Register => self.get_8bit_register_val(&operand2.register) as u16,
-            OperandType::Memory => self.determine_address_from_operand(operand2),
-            _ => panic!("unsupported")
-        };
+                let dst: u8 = match operand1.mode {
+                    OperandType::Immediate => operand1.value as u8,
+                    OperandType::Register => self.get_8bit_register_val(&operand1.register),
+                    OperandType::Memory => self.read_u8(self.determine_address_from_operand(operand1)),
+                    _ => panic!("unsupported")
+                };
 
-        if operand1.mode == OperandType::Register {
-            match self.determine_operand_size_from_register(&operand1.register) {
-                OperandSize::Byte  => {
-                    let prev_value = self.get_8bit_register_val(&operand1.register);
-                    // the u8 cast is okay because this only happens if src was a u8 before (cast into u16)
-                    self.set_8bit_register_val(&operand1.register, prev_value.wrapping_add(src as u8));
-                },
-                OperandSize::TwoBytes => {
-                    let prev_value = self.get_16bit_register_val(&operand1.register);
-                    self.set_16bit_register_val(&operand1.register, prev_value.wrapping_add(src));
+                match operand1.mode {
+                    OperandType::Register => self.set_8bit_register_val(&operand1.register, dst.wrapping_add(src)),
+                    OperandType::Memory   => {
+                        let addr: u16 = self.determine_address_from_operand(&operand1);
+                        self.write_u8(addr, dst.wrapping_add(src));
+                    },
+                    _                     => panic!("trying to write to immediate/none in add")
                 }
-                _ => { panic!("this will never happen because registers are not zero bytes ever") }
+            },
+            OperandSize::TwoBytes => {
+                let src: u16 = match operand2.mode {
+                    OperandType::Immediate => operand2.value,
+                    OperandType::Register => self.get_16bit_register_val(&operand2.register),
+                    OperandType::Memory => self.read_u16(self.determine_address_from_operand(operand2)),
+                    _ => panic!("unsupported")
+                };
+
+                let dst: u16 = match operand1.mode {
+                    OperandType::Immediate => operand1.value,
+                    OperandType::Register => self.get_16bit_register_val(&operand1.register),
+                    OperandType::Memory => self.read_u16(self.determine_address_from_operand(operand1)),
+                    _ => panic!("unsupported")
+                };
+
+                match operand1.mode {
+                    OperandType::Register => self.set_16bit_register_val(&operand1.register, dst.wrapping_add(src)),
+                    OperandType::Memory   => {
+                        let addr: u16 = self.determine_address_from_operand(&operand1);
+                        self.write_u16(addr, dst.wrapping_add(src));
+                    },
+                    _                     => panic!("trying to write to immediate/none in add")
+                }
             }
         }
     }
@@ -502,7 +532,7 @@ impl<'cool> Cpu<'cool> {
     }
 
     pub fn print_regs(&self) -> () {
-        println!("flags: {:b}; reg_a: {:x}; reg_b: {:x}; reg_c: {:x}; reg_d: {:x}; reg_e: {:x}; reg_f: {:x}; reg_h: {:x}; reg_l: {:x}; reg_i: {:x}; reg_r: {:x}", self.flags, self.reg_a, self.reg_b, self.reg_c, self.reg_d, self.reg_e, self.reg_f, self.reg_h, self.reg_l, self.reg_i, self.reg_r);
+        println!("A: {:0>2x}; B: {:0>2x}; C: {:0>2x}; D: {:0>2x}; E: {:0>2x}; F: {:0>2x}; H: {:0>2x}; L: {:0>2x}; I: {:0>2x}; R: {:0>2x}; BC: {:0>4x}; DE: {:0>4x}; HL: {:0>4x}", self.reg_a, self.reg_b, self.reg_c, self.reg_d, self.reg_e, self.reg_f, self.reg_h, self.reg_l, self.reg_i, self.reg_r, self.reg_bc, self.reg_de, self.reg_hl);
     }
 
     pub fn fetch_instruction(&self) -> Result<Instruction, CpuError> {
@@ -552,6 +582,7 @@ impl<'cool> Cpu<'cool> {
             op if utils::bitmask(op, 0b11111111) == 0b11111001 => { self.assemble_ld_sp_hl(op) }, // LD SP, HL
             op if utils::bitmask(op, 0b11001111) == 0b11000101 => { self.assemble_push_qq(op) },
             op if utils::bitmask(op, 0b11001111) == 0b11000001 => { self.assemble_pop_qq(op) },
+            op if utils::bitmask(op, 0b11001111) == 0b00001001 => { self.assemble_add_hl_ss(op) },
 
             op if utils::bitmask(op, 0b11111000) == 0b10001000 => { self.assemble_arithmetic_r(op, OpCode::ADC) },
             op if utils::bitmask(op, 0b11111111) == 0xce       => { self.assemble_arithmetic_n(op, OpCode::ADC) },
@@ -574,7 +605,7 @@ impl<'cool> Cpu<'cool> {
             op if utils::bitmask(op, 0b11111000) == 0b10111000 => { self.assemble_arithmetic_r(op, OpCode::CP) },
             op if utils::bitmask(op, 0b11111111) == 0xfe       => { self.assemble_arithmetic_n(op, OpCode::CP) },
 
-            opcode => { panic!("unknown {:x}", opcode); }
+            opcode => { panic!("unknown {:x} {:?}", opcode, opcode); }
         };
 
         Ok(parsed_instruction)
@@ -754,6 +785,24 @@ impl<'cool> Cpu<'cool> {
         };
 
         Instruction { function: OpCode::LD, cycles: 2, bytes: 1, operand1: dst, operand2: src }
+    }
+
+    fn assemble_add_hl_ss(&self, opcode: u8) -> Instruction {
+        let src = self.register_pair_bitmask_to_enum(utils::extract_bits(opcode, 0b00110000));
+        let src = Operand {
+            mode: OperandType::Register,
+            register: src,
+            ..Default::default()
+        };
+
+        let dst = Register::RegHL;
+        let dst = Operand {
+            mode: OperandType::Register,
+            register: dst,
+            ..Default::default()
+        };
+
+        Instruction { function: OpCode::ADD, cycles: 3, bytes: 1, operand1: dst, operand2: src }
     }
 
     fn assemble_ld_rp_a(&self, opcode: u8) -> Instruction {
