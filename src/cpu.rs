@@ -265,7 +265,7 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
-    fn set_16bit_register_val(&mut self, register: &Register, value: u16) -> () {
+    pub fn set_16bit_register_val(&mut self, register: &Register, value: u16) -> () {
         match *register {
             Register::RegHL => { self.reg_hl = value },
             Register::RegDE => { self.reg_de = value },
@@ -278,7 +278,7 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
-    fn get_16bit_register_val(&self, register: &Register) -> u16 {
+    pub fn get_16bit_register_val(&self, register: &Register) -> u16 {
         match *register {
             Register::RegHL => self.reg_hl,
             Register::RegDE => self.reg_de,
@@ -475,6 +475,33 @@ impl<'cool> Cpu<'cool> {
         };
     }
 
+    pub fn execute_push(&mut self, instruction: &Instruction) -> () {
+        // push only exists in 16 bit
+        let src = &instruction.operand1;
+        let src: u16 = self.get_16bit_register_val(&src.register);
+
+        let mut dst: u16 = self.get_16bit_register_val(&Register::RegSP);
+        dst -= 1; // the stack grows downwards.
+        self.write_u8(dst, ((src & 0xFF00) >> 8) as u8);
+        dst -= 1; // the stack still grows downwards.
+        self.write_u8(dst, ((src & 0x00FF) >> 0) as u8);
+
+        self.set_16bit_register_val(&Register::RegSP, dst);
+    }
+
+    pub fn execute_pop(&mut self, instruction: &Instruction) -> () {
+        //pop only exists in 16 bit
+        let dst = &instruction.operand1;
+        let dst = &dst.register;
+
+        let mut addr = self.get_16bit_register_val(&Register::RegSP);
+        let src = self.read_u16(addr);
+        self.set_16bit_register_val(dst, src);
+
+        addr += 2;
+        self.set_16bit_register_val(&Register::RegSP, addr);
+    }
+
     pub fn execute_nop(&mut self, instruction: &Instruction) -> () {
         // do nothing! yay!
     }
@@ -483,8 +510,8 @@ impl<'cool> Cpu<'cool> {
         match instruction.function {
             OpCode::LD   => self.execute_ld(instruction),
             OpCode::ADD  => self.execute_add(instruction),
-            OpCode::PUSH => self.execute_nop(instruction),
-            OpCode::POP  => self.execute_nop(instruction),
+            OpCode::PUSH => self.execute_push(instruction),
+            OpCode::POP  => self.execute_pop(instruction),
             OpCode::ADC  => self.execute_nop(instruction),
             OpCode::SUB  => self.execute_nop(instruction),
             OpCode::SBC  => self.execute_nop(instruction),
@@ -1370,7 +1397,9 @@ impl<'cool> Cpu<'cool> {
 #[cfg(test)]
 mod tests {
     use cpu::Cpu;
+    use cpu::Register;
     use mmu::Mmu;
+
     #[test]
     fn test_ld_r_r() {
         let bytes = vec![0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x70];
@@ -1574,9 +1603,11 @@ mod tests {
         let bytes = vec![0xd5, 0xdd, 0xe5, 0xfd, 0xe5];
         let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
         let mut processor: Cpu = Cpu::new(&mut memory);
+        processor.set_16bit_register_val(&Register::RegSP, 100);
         assert_eq!(format!("{}", processor.next().unwrap()), "PUSH DE");
         assert_eq!(format!("{}", processor.next().unwrap()), "PUSH IX");
         assert_eq!(format!("{}", processor.next().unwrap()), "PUSH IY");
+        assert_eq!(processor.get_16bit_register_val(&Register::RegSP), 94);
     }
 
     #[test]
@@ -1584,11 +1615,13 @@ mod tests {
         let bytes = vec![0xc1, 0xd1, 0xe1, 0xdd, 0xe1, 0xfd, 0xe1];
         let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
         let mut processor: Cpu = Cpu::new(&mut memory);
+        processor.set_16bit_register_val(&Register::RegSP, 100);
         assert_eq!(format!("{}", processor.next().unwrap()), "POP BC");
         assert_eq!(format!("{}", processor.next().unwrap()), "POP DE");
         assert_eq!(format!("{}", processor.next().unwrap()), "POP HL");
         assert_eq!(format!("{}", processor.next().unwrap()), "POP IX");
         assert_eq!(format!("{}", processor.next().unwrap()), "POP IY");
+        assert_eq!(processor.get_16bit_register_val(&Register::RegSP), 110);
     }
 
     #[test]
