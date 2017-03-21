@@ -77,7 +77,10 @@ pub enum OpCode {
     CP,
     NOP,
     PUSH,
-    POP
+    POP,
+    BIT,
+    SET,
+    RES
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -519,6 +522,9 @@ impl<'cool> Cpu<'cool> {
             OpCode::OR   => self.execute_nop(instruction),
             OpCode::XOR  => self.execute_nop(instruction),
             OpCode::CP   => self.execute_nop(instruction),
+            OpCode::BIT  => self.execute_nop(instruction),
+            OpCode::SET  => self.execute_nop(instruction),
+            OpCode::RES  => self.execute_nop(instruction),
             _            => { panic!("can't execute dis {:?}", instruction.function); }
         };
 
@@ -631,6 +637,8 @@ impl<'cool> Cpu<'cool> {
 
             op if utils::bitmask(op, 0b11111000) == 0b10111000 => { self.assemble_arithmetic_r(op, OpCode::CP) },
             op if utils::bitmask(op, 0b11111111) == 0xfe       => { self.assemble_arithmetic_n(op, OpCode::CP) },
+
+            op if utils::bitmask(op, 0b11111111) == 0xcb       => { self.handle_cb_prefix(op) },
 
             opcode => { panic!("unknown {:x} {:?}", opcode, opcode); }
         };
@@ -933,6 +941,83 @@ impl<'cool> Cpu<'cool> {
         Instruction { function: OpCode::LD, cycles: 4, bytes: 3, operand1: dst, operand2: src }
     }
 
+    pub fn handle_cb_prefix(&self, opcode: u8) -> Instruction {
+        let opcodes = self.peek_bytes(2).expect("Expecting at least 2 bytes for a CB prefixed instruction");
+        match opcodes[1] {
+            bitinfo if utils::extract_bits(bitinfo, 0b11000000) == 0b01 => {
+                self.build_test_instruction(OpCode::BIT, bitinfo, 0x00, 0)
+            },
+            bitinfo if utils::extract_bits(bitinfo, 0b11000000) == 0b11 => {
+                self.build_test_instruction(OpCode::SET, bitinfo, 0x00, 0)
+            },
+            bitinfo if utils::extract_bits(bitinfo, 0b11000000) == 0b10 => {
+                self.build_test_instruction(OpCode::RES, bitinfo, 0x00, 0)
+            },
+            _ => { panic!("unknown cb prefixed instruction"); }
+        }
+    }
+
+    pub fn build_test_instruction(&self, function: OpCode, bitinfo: u8, prefix: u8, displacement: i8) -> Instruction {
+        match function {
+            OpCode::BIT => {},
+            OpCode::SET => {},
+            OpCode::RES => {},
+            _           => { panic!("using a non test opcode to build a test instruction") }
+        };
+
+        let bit = utils::extract_bits(bitinfo, 0b00111000);
+        let bit = Operand {
+            mode: OperandType::Immediate,
+            size: OperandSize::Byte,
+            value: bit as u16,
+            ..Default::default()
+        };
+
+        if prefix == 0xdd || prefix == 0xfd {
+            let target = match prefix {
+                0xdd => { Register::RegIX },
+                0xfd => { Register::RegIY },
+                _    => { panic!("unknown target register"); }
+            };
+
+            let target = Operand {
+                mode: OperandType::Memory,
+                register: target,
+                displacement: displacement,
+                size: OperandSize::Byte,
+                ..Default::default()
+            };
+
+            let cycles = match function {
+                OpCode::BIT => 5,
+                OpCode::SET => 6,
+                OpCode::RES => 6,
+                _ => panic!("it's impossible")
+            };
+
+            return Instruction { function: function, cycles: cycles, bytes: 4, operand1: bit, operand2: target };
+        } else {
+            let target = utils::extract_bits(bitinfo, 0b00000111);
+            let target = self.register_single_bitmask_to_enum(target);
+            let cycles = match function {
+                OpCode::BIT => match target { Register::RegHL => 3, _ => 2 },
+                OpCode::SET => match target { Register::RegHL => 4, _ => 2 },
+                OpCode::RES => match target { Register::RegHL => 4, _ => 4 },
+                _ => panic!("it's really impossible, I'm telling you")
+            };
+
+            let target = Operand {
+                mode: if target == Register::RegHL { OperandType::Memory } else { OperandType::Register },
+                size: if target == Register::RegHL { OperandSize::Byte   } else { OperandSize::Zero     },
+                register: target,
+                ..Default::default()
+            };
+
+
+            return Instruction { function: function, cycles: cycles, bytes: 2, operand1: bit, operand2: target };
+        }
+    }
+
     pub fn handle_ed_prefix(&self, opcode: u8) -> Instruction {
         let opcodes = self.peek_bytes(2).expect("Expecting 2 bytes for an ED prefixed instruction");
         match opcodes[1]  {
@@ -1027,7 +1112,19 @@ impl<'cool> Cpu<'cool> {
         match opcodes[1] {
             0xdd => { self.assemble_nop() },
             0xfd => { self.assemble_nop() },
-            0xcb => { panic!("unimplemented cb prefix"); },
+            0xcb => {
+                let opcodes = self.peek_bytes(4).expect("dd/fd cb prefixes require 4 bytes");
+                let bitinfo = opcodes[3];
+                let prefix = opcodes[0];
+                let displacement = opcodes[2] as i8;
+
+                match utils::extract_bits(bitinfo, 0b11000000) {
+                    0b01 => self.build_test_instruction(OpCode::BIT, bitinfo, prefix, displacement),
+                    0b11 => self.build_test_instruction(OpCode::SET, bitinfo, prefix, displacement),
+                    0b10 => self.build_test_instruction(OpCode::RES, bitinfo, prefix, displacement),
+                    _ => panic!("unknown dd/fd cb prefix")
+                }
+            },
             0x36 => { self.assemble_ld_ix_iy_n(opcode) },
             0x21 => { self.assemble_ld_ix_iy_nn(opcode) },
             0x2a => { self.assemble_ld_ix_iy_nn_mem(opcode) },
@@ -1677,5 +1774,38 @@ mod tests {
         assert_eq!(format!("{}", processor.next().unwrap()), "OR 65");
         assert_eq!(format!("{}", processor.next().unwrap()), "XOR 65");
         assert_eq!(format!("{}", processor.next().unwrap()), "CP 65");
+    }
+
+    #[test]
+    fn test_bit() {
+        let bytes = vec![0xcb, 0x47, 0xcb, 0x46, 0xdd, 0xcb, 0x41, 0x47, 0xfd, 0xcb, 0x41, 0x7e];
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
+        assert_eq!(format!("{}", processor.next().unwrap()), "BIT 0, A");
+        assert_eq!(format!("{}", processor.next().unwrap()), "BIT 0, (HL)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "BIT 0, (IX+65)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "BIT 7, (IY+65)");
+    }
+
+    #[test]
+    fn test_set() {
+        let bytes = vec![0xcb, 0xc7, 0xcb, 0xc6, 0xdd, 0xcb, 0x41, 0xff, 0xfd, 0xcb, 0xff, 0xff];
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
+        assert_eq!(format!("{}", processor.next().unwrap()), "SET 0, A");
+        assert_eq!(format!("{}", processor.next().unwrap()), "SET 0, (HL)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "SET 7, (IX+65)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "SET 7, (IY-1)");
+    }
+
+    #[test]
+    fn test_res() {
+        let bytes = vec![0xcb, 0x87, 0xcb, 0x86, 0xdd, 0xcb, 0x41, 0xbf, 0xfd, 0xcb, 0xff, 0xbf];
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
+        assert_eq!(format!("{}", processor.next().unwrap()), "RES 0, A");
+        assert_eq!(format!("{}", processor.next().unwrap()), "RES 0, (HL)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "RES 7, (IX+65)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "RES 7, (IY-1)");
     }
 }
