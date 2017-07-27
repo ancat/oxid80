@@ -80,7 +80,8 @@ pub enum OpCode {
     POP,
     BIT,
     SET,
-    RES
+    RES,
+    JP
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -196,6 +197,7 @@ pub struct Cpu<'cool> {
     reg_sp: u16,
     cycles: u64,
     flags: u8,
+    jump: bool,
     mmu: &'cool mut mmu::Mmu
 }
 
@@ -232,6 +234,7 @@ impl<'cool> Cpu<'cool> {
             reg_sp: 0,
             cycles: 0,
             flags: 0,
+            jump: false,
             mmu: mmu
         }
     }
@@ -302,6 +305,10 @@ impl<'cool> Cpu<'cool> {
         }
     }
 
+    pub fn get_flag(&self, flag: Flag) -> bool {
+        return (self.flags & (flag as u8)) > 0
+    }
+
     pub fn determine_instruction_size(&self, instruction: &Instruction) -> OperandSize {
         let size: OperandSize;
 
@@ -368,6 +375,35 @@ impl<'cool> Cpu<'cool> {
         }
 
         address as u16
+    }
+
+    pub fn execute_jump(&mut self, instruction: &Instruction) -> () {
+        let destination = &instruction.operand1;
+        let conditional = &instruction.operand2;
+
+        let dst = destination.value;
+
+        if conditional.mode == OperandType::None {
+            self.jump = true;
+            return self.set_16bit_register_val(&Register::RegPC, dst);
+        }
+
+        let jump_or_not = match conditional.value {
+            000 => { !self.get_flag(Flag::FlagZ)  }, // NZ
+            001 => {  self.get_flag(Flag::FlagZ)  }, // Z
+            010 => { !self.get_flag(Flag::FlagC)  }, // NC
+            011 => {  self.get_flag(Flag::FlagC)  }, // C
+            100 => { !self.get_flag(Flag::FlagPV) }, // parity odd
+            101 => {  self.get_flag(Flag::FlagPV) }, // parity even
+            110 => { !self.get_flag(Flag::FlagS)  }, // signed positive
+            111 => {  self.get_flag(Flag::FlagS)  }, // signed negative,*/
+            _   => panic!("invalid conditional for jp cc, nn")
+        };
+
+        if jump_or_not {
+            self.jump = true;
+            self.set_16bit_register_val(&Register::RegPC, dst)
+        }
     }
 
     // ADD A, r
@@ -525,6 +561,7 @@ impl<'cool> Cpu<'cool> {
             OpCode::BIT  => self.execute_nop(instruction),
             OpCode::SET  => self.execute_nop(instruction),
             OpCode::RES  => self.execute_nop(instruction),
+            OpCode::JP   => self.execute_jump(instruction),
             _            => { panic!("can't execute dis {:?}", instruction.function); }
         };
 
@@ -559,13 +596,20 @@ impl<'cool> Cpu<'cool> {
         // TODO: everything else
         self.set_flag(Flag::FlagS, sign_bit == 1);
         self.set_flag(Flag::FlagZ, prev_zero);
-        self.reg_pc += instruction.bytes as u16;
+        // if we're jumping, we don't want to bother updating pc ourselves
+        if !self.jump {
+            self.reg_pc += instruction.bytes as u16;
+        }
+
         self.cycles += instruction.cycles as u64;
+        self.jump = false; // reset jump flag
         instruction
     }
 
     pub fn print_regs(&self) -> () {
-        println!("A: {:0>2x}; B: {:0>2x}; C: {:0>2x}; D: {:0>2x}; E: {:0>2x}; F: {:0>2x}; H: {:0>2x}; L: {:0>2x}; I: {:0>2x}; R: {:0>2x}; BC: {:0>4x}; DE: {:0>4x}; HL: {:0>4x}", self.reg_a, self.reg_b, self.reg_c, self.reg_d, self.reg_e, self.reg_f, self.reg_h, self.reg_l, self.reg_i, self.reg_r, self.reg_bc, self.reg_de, self.reg_hl);
+        println!(
+            "PC: {:0>4x} A: {:0>2x}; B: {:0>2x}; C: {:0>2x}; D: {:0>2x}; E: {:0>2x}; F: {:0>2x}; H: {:0>2x}; L: {:0>2x}; I: {:0>2x}; R: {:0>2x}; BC: {:0>4x}; DE: {:0>4x}; HL: {:0>4x}; Z: {:?}",
+            self.reg_pc, self.reg_a, self.reg_b, self.reg_c, self.reg_d, self.reg_e, self.reg_f, self.reg_h, self.reg_l, self.reg_i, self.reg_r, self.reg_bc, self.reg_de, self.reg_hl, self.get_flag(Flag::FlagZ));
     }
 
     pub fn fetch_instruction(&self) -> Result<Instruction, CpuError> {
@@ -640,6 +684,9 @@ impl<'cool> Cpu<'cool> {
 
             op if utils::bitmask(op, 0b11111111) == 0xcb       => { self.handle_cb_prefix(op) },
 
+            op if utils::bitmask(op, 0b11111111) == 0xc3       => { self.assemble_direct_jump(op) },
+            op if utils::bitmask(op, 0b11000111) == 0b11000010 => { self.assemble_conditional_jump(op) },
+
             opcode => { panic!("unknown {:x} {:?}", opcode, opcode); }
         };
 
@@ -668,6 +715,47 @@ impl<'cool> Cpu<'cool> {
             0b11 => { Register::RegSP },
             _    => { panic!("unknown register pair bitmask"); }
         }
+    }
+
+    fn assemble_conditional_jump(&self, opcode: u8) -> Instruction {
+        let opcodes = self.peek_bytes(3).expect("Expecting 3 bytes for JP cc, nn");
+        let condition = utils::extract_bits(opcodes[0], 0b00111000) as u16;
+
+        let dst: u16 = ((opcodes[2] as u16) << 8) | (opcodes[1] as u16);
+        let dst = Operand {
+            mode: OperandType::Memory,
+            size: OperandSize::TwoBytes,
+            value: dst,
+            ..Default::default()
+        };
+
+        let condition = Operand {
+            mode: OperandType::Immediate,
+            size: OperandSize::Byte,
+            value: condition,
+            ..Default::default()
+        };
+
+        Instruction { function: OpCode::JP, cycles: 3, bytes: 3, operand1: dst, operand2: condition }
+    }
+
+    fn assemble_direct_jump(&self, opcode: u8) -> Instruction {
+        let opcodes = self.peek_bytes(3).expect("Expecting 3 bytes for JP nn");
+
+        let dst: u16 = ((opcodes[2] as u16) << 8) | (opcodes[1] as u16);
+        let dst = Operand {
+            mode: OperandType::Memory,
+            size: OperandSize::TwoBytes,
+            value: dst,
+            ..Default::default()
+        };
+
+        let op2 = Operand {
+            mode: OperandType::None,
+            ..Default::default()
+        };
+
+        Instruction { function: OpCode::JP, cycles: 3, bytes: 3, operand1: dst, operand2: op2 }
     }
 
     fn assemble_pop_qq(&self, opcode: u8) -> Instruction {
@@ -1807,5 +1895,47 @@ mod tests {
         assert_eq!(format!("{}", processor.next().unwrap()), "RES 0, (HL)");
         assert_eq!(format!("{}", processor.next().unwrap()), "RES 7, (IX+65)");
         assert_eq!(format!("{}", processor.next().unwrap()), "RES 7, (IY-1)");
+    }
+
+    #[test]
+    fn test_absolute_jumps() {
+        /*
+            ; If the jump is properly executed, A will be 2
+            LD A, 0
+            JP test
+            ADD A, 1
+
+            test:
+            ADD A, 2
+        */
+        let bytes = vec![0x3e, 0x00, 0xc3, 0x07, 0x00, 0xc6, 0x01, 0xc6, 0x02];
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD A, 0");
+        assert_eq!(format!("{}", processor.next().unwrap()), "JP (7)");
+        assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, 2");
+        assert_eq!(processor.reg_a, 2);
+    }
+
+    #[test]
+    fn test_conditional_absolute_jump() {
+        /*
+            ; If the jump is properly executed, A will be 2
+            LD A, 255
+            ADD A, 1    ; overflow to 0
+            JP Z, test  ; if A = 0, goto test
+            LD A, 1     ; should never execute
+
+            test:
+            ADD A, 2
+        */
+        let bytes = vec![0x3e, 0xff, 0xc6, 0x01, 0xca, 0x09, 0x00, 0x3e, 0x01, 0xc6, 0x02];
+        let mut memory: Mmu = Mmu::new_with_init(65536, &bytes);
+        let mut processor: Cpu = Cpu::new(&mut memory);
+        assert_eq!(format!("{}", processor.next().unwrap()), "LD A, 255");
+        assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, 1");
+        assert_eq!(format!("{}", processor.next().unwrap()), "JP (9), 1");
+        assert_eq!(format!("{}", processor.next().unwrap()), "ADD A, 2");
+        assert_eq!(processor.reg_a, 2);
     }
 }
